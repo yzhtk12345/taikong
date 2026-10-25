@@ -19,9 +19,10 @@ else
 fi
 CPU_ARCH=$(uname -m | tr -d '\0')
 
-# 检测 x86_64 的微架构级别 (v2 / v3 / v4)
+# 检测 x86_64 的微架构级别，并做好通用架构兜底
 CPU_V_LEVEL="不适用 (非 x86_64)"
-SINGBOX_CPU_SUFFIX="amd64" # 默认回退
+SINGBOX_CPU_SUFFIX="amd64" # 默认兜底为通用 amd64
+
 if [ "$CPU_ARCH" = "x86_64" ]; then
     if grep -q "avx512f" /proc/cpuinfo; then
         CPU_V_LEVEL="x86-64-v4 (支持 AVX-512)"
@@ -33,12 +34,15 @@ if [ "$CPU_ARCH" = "x86_64" ]; then
         CPU_V_LEVEL="x86-64-v2 (支持 SSE4.2)"
         SINGBOX_CPU_SUFFIX="amd64-v2"
     else
-        CPU_V_LEVEL="x86-64-v1 (基础兼容版)"
+        CPU_V_LEVEL="x86-64-v1 (基础兼容版，使用通用架构)"
         SINGBOX_CPU_SUFFIX="amd64"
     fi
 elif [ "$CPU_ARCH" = "aarch64" ]; then
     CPU_V_LEVEL="ARM64 (aarch64)"
     SINGBOX_CPU_SUFFIX="arm64"
+else
+    # 其他未知架构的通用兜底
+    SINGBOX_CPU_SUFFIX="$CPU_ARCH"
 fi
 
 CURRENT_HOSTNAME=$(hostname)
@@ -56,7 +60,6 @@ fi
 # ==========================================
 get_local_singbox_status() {
     if command -v sing-box &>/dev/null; then
-        # 提取版本号，形如 1.x.x
         LOCAL_SB_VERSION=$(sing-box version 2>/dev/null | head -n 1 | awk '{print $3}')
         [ -z "$LOCAL_SB_VERSION" ] && LOCAL_SB_VERSION="已知晓但版本未知"
         echo "已安装 ($LOCAL_SB_VERSION)"
@@ -165,7 +168,7 @@ action_init_security() {
 }
 
 # ==========================================
-# 功能函数 2: 管理与安装 sing-box (对接 shtorm-7/sing-box-extended)
+# 功能函数 2: 管理与安装 sing-box (带通用架构降级兜底)
 # ==========================================
 action_manage_singbox() {
     echo -e "\n===================================="
@@ -188,36 +191,45 @@ action_manage_singbox() {
         echo "[+] 本地系统已安装版本 : ${LOCAL_VERSION:-未知}"
         
         # 版本比对逻辑
-        if [ "$LATEST_TAG" != "未知" ] && [ "$Local_VERSION" = "$LATEST_TAG" ]; then
+        if [ "$LATEST_TAG" != "未知" ] && [ "$LOCAL_VERSION" = "$LATEST_TAG" ]; then
             echo "[√] 状态：当前已是最新版本 ($LATEST_TAG)"
         else
-            echo "[!] 状态：本地版本与远程最新版本不一致或无法精准匹配。"
+            echo "[!] 状态：版本不一致或需要更新。"
             echo "    -> 当前本地版本: ${LOCAL_VERSION:-未知}"
             echo "    -> 远程最新版本: $LATEST_TAG"
         fi
 
         read -p "是否需要重新下载并覆盖安装最新版？(y/n): " reinstall < /dev/tty
-        if [ "$reinstall" != "y" ]; then
-            return
-        fi
+        [ "$reinstall" != "y" ] && return
     else
         echo "[-] 本地状态：系统未安装 sing-box。"
         read -p "是否立即从 shtorm-7/sing-box-extended 下载并安装最新版？(y/n): " do_install < /dev/tty
         [ "$do_install" != "y" ] && return
     fi
 
-    # 执行下载与安装逻辑
-    echo "[+] 正在匹配您的 CPU 架构 ($SINGBOX_CPU_SUFFIX) 准备下载..."
+    # 执行下载与安装逻辑（带智能降级兜底）
+    echo "[+] 正在匹配您的 CPU 架构首选项 ($SINGBOX_CPU_SUFFIX) 准备下载..."
     
-    # 动态抓取对应架构的下载链接 (匹配 linux-amd64/arm64 等资产)
+    # 优先尝试匹配当前检测到的具体架构（如 amd64-v3, arm64 等）
     DOWNLOAD_URL=$(curl -sSL https://api.github.com/repos/shtorm-7/sing-box-extended/releases/latest | grep "browser_download_url" | grep -E "linux-$SINGBOX_CPU_SUFFIX" | head -n 1 | cut -d '"' -f 4)
 
+    # 【关键兜底】：如果没匹配到优化的专属架构包，自动降级尝试匹配标准的通用架构（linux-amd64 或 linux-arm64）
+    if [ -z "$DOWNLOAD_URL" ] && [[ "$SINGBOX_CPU_SUFFIX" =~ ^amd64 ]]; then
+        echo "[!] 未能匹配到专属优化架构包，正在自动降级尝试下载【通用标准 amd64】版本..."
+        SINGBOX_CPU_SUFFIX="amd64"
+        DOWNLOAD_URL=$(curl -sSL https://api.github.com/repos/shtorm-7/sing-box-extended/releases/latest | grep "browser_download_url" | grep -E "linux-amd64" | head -n 1 | cut -d '"' -f 4)
+    elif [ -z "$DOWNLOAD_URL" ] && [[ "$SINGBOX_CPU_SUFFIX" =~ ^arm64 ]]; then
+        echo "[!] 未能匹配到专属优化架构包，正在自动降级尝试下载【通用标准 arm64】版本..."
+        SINGBOX_CPU_SUFFIX="arm64"
+        DOWNLOAD_URL=$(curl -sSL https://api.github.com/repos/shtorm-7/sing-box-extended/releases/latest | grep "browser_download_url" | grep -E "linux-arm64" | head -n 1 | cut -d '"' -f 4)
+    fi
+
     if [ -z "$DOWNLOAD_URL" ]; then
-        echo "[-] 错误：未能从 Release 中匹配到对应架构 (${SINGBOX_CPU_SUFFIX}) 的安装包链接！"
+        echo "[-] 错误：未能从 Release 中匹配到任何可用的 Linux 架构安装包链接！"
         return
     fi
 
-    echo "[+] 获取到下载地址: $DOWNLOAD_URL"
+    echo "[+] 最终确定的下载地址: $DOWNLOAD_URL"
     TEMP_FILE="/tmp/sing-box-extended.tar.gz"
     
     echo "[+] 正在下载安装包..."
@@ -249,7 +261,6 @@ action_manage_singbox() {
 # ==========================================
 show_menu() {
     clear
-    # 动态获取当前的 sing-box 安装状态供菜单展示
     SB_MENU_STATUS=$(get_local_singbox_status)
 
     echo "=================================================="
