@@ -41,7 +41,6 @@ elif [ "$CPU_ARCH" = "aarch64" ]; then
     CPU_V_LEVEL="ARM64 (aarch64)"
     SINGBOX_CPU_SUFFIX="arm64"
 else
-    # 其他未知架构的通用兜底
     SINGBOX_CPU_SUFFIX="$CPU_ARCH"
 fi
 
@@ -175,7 +174,6 @@ action_manage_singbox() {
     echo "  正在检查 sing-box 版本与远程更新..."
     echo "===================================="
 
-    # 获取 GitHub 仓库 shtorm-7/sing-box-extended 的最新 Release 版本标签
     LATEST_TAG=$(curl -sSL https://api.github.com/repos/shtorm-7/sing-box-extended/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     
     if [ -z "$LATEST_TAG" ]; then
@@ -185,12 +183,10 @@ action_manage_singbox() {
         echo "[+] 远程仓库最新版本 : $LATEST_TAG"
     fi
 
-    # 检查本地安装状态
     if command -v sing-box &>/dev/null; then
         LOCAL_VERSION=$(sing-box version 2>/dev/null | head -n 1 | awk '{print $3}')
         echo "[+] 本地系统已安装版本 : ${LOCAL_VERSION:-未知}"
         
-        # 版本比对逻辑
         if [ "$LATEST_TAG" != "未知" ] && [ "$LOCAL_VERSION" = "$LATEST_TAG" ]; then
             echo "[√] 状态：当前已是最新版本 ($LATEST_TAG)"
         else
@@ -207,13 +203,10 @@ action_manage_singbox() {
         [ "$do_install" != "y" ] && return
     fi
 
-    # 执行下载与安装逻辑（带智能降级兜底）
     echo "[+] 正在匹配您的 CPU 架构首选项 ($SINGBOX_CPU_SUFFIX) 准备下载..."
     
-    # 优先尝试匹配当前检测到的具体架构（如 amd64-v3, arm64 等）
     DOWNLOAD_URL=$(curl -sSL https://api.github.com/repos/shtorm-7/sing-box-extended/releases/latest | grep "browser_download_url" | grep -E "linux-$SINGBOX_CPU_SUFFIX" | head -n 1 | cut -d '"' -f 4)
 
-    # 【关键兜底】：如果没匹配到优化的专属架构包，自动降级尝试匹配标准的通用架构（linux-amd64 或 linux-arm64）
     if [ -z "$DOWNLOAD_URL" ] && [[ "$SINGBOX_CPU_SUFFIX" =~ ^amd64 ]]; then
         echo "[!] 未能匹配到专属优化架构包，正在自动降级尝试下载【通用标准 amd64】版本..."
         SINGBOX_CPU_SUFFIX="amd64"
@@ -238,18 +231,25 @@ action_manage_singbox() {
         mkdir -p /tmp/sing-box-extract
         tar -xzf "$TEMP_FILE" -C /tmp/sing-box-extract --strip-components=1 2>/dev/null || tar -xzf "$TEMP_FILE" -C /tmp/sing-box-extract
         
-        # 寻找二进制文件并移动到 /usr/local/bin
         SB_BINARY=$(find /tmp/sing-box-extract -type f -name "sing-box" | head -n 1)
         if [ -n "$SB_BINARY" ]; then
             cp -f "$SB_BINARY" /usr/local/bin/sing-box
             chmod +x /usr/local/bin/sing-box
+            
+            # 创建默认配置目录
+            mkdir -p /etc/sing-box
+            
             echo "[√] sing-box 安装/更新成功！"
+            echo "--------------------------------------------------"
+            echo " 【安装路径与配置指南】"
+            echo " - 程序二进制文件路径 : /usr/local/bin/sing-box"
+            echo " - 默认配置文件目录   : /etc/sing-box/ (可在此放置 config.json)"
+            echo "--------------------------------------------------"
             sing-box version
         else
             echo "[-] 错误：在解压后的文件中没有找到 sing-box 二进制程序。"
-        fi
+        end
         
-        # 清理临时文件
         rm -rf "$TEMP_FILE" /tmp/sing-box-extract
     else
         echo "[-] 错误：下载文件失败！"
