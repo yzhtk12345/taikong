@@ -55,7 +55,7 @@ else
 fi
 
 # ==========================================
-# 辅助函数: 检查本地 sing-box 状态与版本
+# 辅助函数: 获取本地 sing-box 状态与详细路径信息
 # ==========================================
 get_local_singbox_status() {
     if command -v sing-box &>/dev/null; then
@@ -247,8 +247,8 @@ action_manage_singbox() {
             echo "--------------------------------------------------"
             sing-box version
         else
-            echo "[-] 错误：在解压后的文件中没有找到 sing-box 二进制程序。"
-        end
+            echo "[-] 错误：在解压后的文件中没有找到 sing-box 二进制程序."
+        fi
         
         rm -rf "$TEMP_FILE" /tmp/sing-box-extract
     else
@@ -273,6 +273,10 @@ show_menu() {
     echo " - 当前主机名   : $CURRENT_HOSTNAME"
     echo " - Root 远程登录: $ROOT_LOGIN_STATUS"
     echo " - sing-box状态 : $SB_MENU_STATUS"
+    if command -v sing-box &>/dev/null; then
+        echo "   -> 程序安装路径 : /usr/local/bin/sing-box"
+        echo "   -> 配置文件目录 : /etc/sing-box/"
+    fi
     echo "=================================================="
     echo " 请选择要执行的功能操作："
     echo "   1. 执行系统初始化与安全加固 (建用户/改端口/禁Root)"
