@@ -125,3 +125,9 @@ user_manager_check_privileges() {
     echo "[安全说明] 本阶段只读取信息，不创建账号、不修改用户组或权限。"
     echo "===================================="
 }
+
+# 直接运行本文件时进入菜单；
+# 被其他模块 source 时不自动启动菜单。
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    user_manager_menu
+fi
