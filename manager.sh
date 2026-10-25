@@ -1,4 +1,4 @@
-```bash
+
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
@@ -13,11 +13,10 @@ while true; do
     echo "================================"
     echo "1) 系统兼容性检测"
     echo "2) 主机名管理"
-    echo "3) 管理账号与权限"
     echo "0) 退出"
     echo "================================"
 
-    read -r -p "请选择 [0-3]: " choice || choice=0
+    read -r -p "请选择 [0-2]: " choice || choice=0
 
     case "$choice" in
         1)
@@ -27,17 +26,12 @@ while true; do
             source "$SCRIPT_DIR/modules/system/hostname.sh"
             hostname_menu
             ;;
-        3)
-            source "$SCRIPT_DIR/modules/system/user_manager.sh"
-            user_manager_menu
-            ;;
         0)
             echo "已退出 Taikong VPS Manager。"
             exit 0
             ;;
         *)
-            echo "无效选项，请输入 0、1、2 或 3。"
+            echo "无效选项，请输入 0、1 或 2。"
             ;;
     esac
 done
-```
