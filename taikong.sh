@@ -56,7 +56,7 @@ action_init_security() {
     # 1. 创建用户
     RANDOM_USER="user_$(tr -dc 'a-z0-9' < /dev/urandom | head -c 4)"
     while true; do
-        read -p "请输入要创建的新用户名 (直接回车将随机生成 [$RANDOM_USER]): " NEW_USER
+        read -p "请输入要创建的新用户名 (直接回车将随机生成 [$RANDOM_USER]): " NEW_USER < /dev/tty
         if [ -z "$NEW_USER" ]; then
             NEW_USER="$RANDOM_USER"
             echo "[+] 已自动随机生成用户名: $NEW_USER"
@@ -88,7 +88,7 @@ action_init_security() {
     # 3. 修改 SSH 端口
     RANDOM_PORT=$((RANDOM % 64512 + 1024))
     while true; do
-        read -p "请输入新的 SSH 端口 (1024-65535，直接回车随机生成 [$RANDOM_PORT]): " NEW_SSH_PORT
+        read -p "请输入新的 SSH 端口 (1024-65535，直接回车随机生成 [$RANDOM_PORT]): " NEW_SSH_PORT < /dev/tty
         if [ -z "$NEW_SSH_PORT" ]; then
             NEW_SSH_PORT="$RANDOM_PORT"
             echo "[+] 已自动随机生成 SSH 端口: $NEW_SSH_PORT"
@@ -96,7 +96,7 @@ action_init_security() {
         elif [[ "$NEW_SSH_PORT" =~ ^[0-9]+$ ]] && [ "$NEW_SSH_PORT" -ge 1 ] && [ "$NEW_SSH_PORT" -le 65535 ]; then
             if [ "$NEW_SSH_PORT" -eq 22 ]; then
                 echo "[-] 提示：你输入的是默认的 22 端口。"
-                read -p "确定要继续使用 22 吗？(y/n): " confirm
+                read -p "确定要继续使用 22 吗？(y/n): " confirm < /dev/tty
                 [ "$confirm" = "y" ] && break
             else
                 break
@@ -165,21 +165,21 @@ show_menu() {
     echo "   3. [预留扩展] 第三个功能 (等你来定)"
     echo "   0. 退出脚本"
     echo "=================================================="
-    read -p "请输入选项数字 [0-3]: " choice
+    read -p "请输入选项数字 [0-3]: " choice < /dev/tty
 
     case "$choice" in
         1)
             action_init_security
             echo ""
-            read -p "按回车键返回主菜单..." 
+            read -p "按回车键返回主菜单..." < /dev/tty
             ;;
         2)
             echo -e "\n[!] 提示：第二个功能正在构思中，敬请期待..."
-            read -p "按回车键返回主菜单..." 
+            read -p "按回车键返回主菜单..." < /dev/tty
             ;;
         3)
             echo -e "\n[!] 提示：第三个功能正在构思中，敬请期待..."
-            read -p "按回车键返回主菜单..." 
+            read -p "按回车键返回主菜单..." < /dev/tty
             ;;
         0)
             echo "感谢使用，再见！"
