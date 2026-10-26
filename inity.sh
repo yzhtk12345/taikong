@@ -6,7 +6,9 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 目录与路径规范
+export LANG=en_US.UTF-8
+
+# 路径与目录规范
 DATA_DIR="/etc/sing-box/xinxi"
 CONFIG_FILE="/etc/sing-box/config.json"
 DATA_JSON="$DATA_DIR/deploy_data.json"
@@ -16,7 +18,7 @@ CERT_ZHIQIAN_DIR="/etc/sing-box/zhiqian"
 mkdir -p "$DATA_DIR" /etc/sing-box "$CERT_YUMING_DIR" "$CERT_ZHIQIAN_DIR"
 
 # ==========================================
-# 步骤 1: 系统与环境基础检测
+# 步骤 1: 系统环境基础检测
 # ==========================================
 if [ -f /etc/os-release ]; then
     . /etc/os-release
@@ -43,7 +45,6 @@ elif [ "$CPU_ARCH" = "aarch64" ]; then
     SINGBOX_CPU_SUFFIX="arm64"
 fi
 
-CURRENT_HOSTNAME=$(hostname)
 SERVER_IP=$(curl -sSL -4 ip.sb 2>/dev/null || hostname -I | awk '{print $1}')
 
 get_local_singbox_status() {
@@ -73,6 +74,124 @@ get_random_port() {
             return
         fi
     done
+}
+
+# ==========================================
+# 步骤 2: 甬哥正宗 ACME 证书申请核心逻辑
+# ==========================================
+v4v6(){
+    v4=$(curl -s4m5 icanhazip.com -k)
+    v6=$(curl -s6m5 icanhazip.com -k)
+}
+
+acme_install_deps() {
+    if [ -x "$(command -v apt-get)" ]; then
+        apt update -y && apt install -y socat cron curl openssl lsof dnsutils tar wget
+    elif [ -x "$(command -v yum)" ]; then
+        yum update -y && yum install -y epel-release && yum install -y socat cronie bind-utils curl openssl lsof tar wget
+    elif [ -x "$(command -v dnf)" ]; then
+        dnf update -y && dnf install -y socat cronie bind-utils curl openssl lsof tar wget
+    fi
+}
+
+acme2(){
+    if [[ -n $(lsof -i :80|grep -v "PID") ]]; then
+        echo "[!] 检测到80端口被占用，正在执行80端口释放..."
+        lsof -i :80|grep -v "PID"|awk '{print "kill -9",$2}'|sh >/dev/null 2>&1
+        sleep 2
+    fi
+}
+
+checkip(){
+    v4v6
+    vpsip=${v4:-$v6}
+    domainIP=$(dig @8.8.8.8 +time=2 +short "$ym" 2>/dev/null | grep -m1 '^[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+$')
+    if [[ -z $domainIP ]]; then
+        domainIP=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$ym" 2>/dev/null | grep -m1 ':')
+    fi
+    if [[ ! $domainIP =~ $v4 ]] && [[ ! $domainIP =~ $v6 ]]; then
+        echo "[-] 错误：当前域名解析的 IP 与本地 VPS IP 不匹配！"
+        return 1
+    fi
+    return 0
+}
+
+run_yongge_acme() {
+    acme_install_deps
+    echo "[+] 正在初始化安装 acme.sh 证书申请脚本..."
+    auto=`date +%s%N |md5sum | cut -c 1-6`
+    Aemail=$auto@gmail.com
+    
+    bash ~/.acme.sh/acme.sh --uninstall >/dev/null 2>&1
+    rm -rf ~/.acme.sh acme.sh
+    curl https://get.acme.sh | sh -s email=$Aemail
+    bash ~/.acme.sh/acme.sh --upgrade --use-wget --auto-upgrade >/dev/null 2>&1
+
+    mkdir -p "$CERT_YUMING_DIR"
+
+    echo "===================================="
+    echo " 1. 独立 80 端口模式申请 IP/域名证书"
+    echo " 2. DNS API 模式申请 (Cloudflare / 腾讯云 / 阿里云)"
+    echo "===================================="
+    read -p "请选择申请方式 [1-2]: " acme_mode < /dev/tty
+
+    if [ "$acme_mode" = "1" ]; then
+        acme2
+        v4v6
+        vpsip=${v4:-$v6}
+        read -p "请输入要申请证书的域名或IP [回车默认 ${vpsip%% *}]: " ym < /dev/tty
+        [ -z "$ym" ] && ym=${vpsip%% *}
+        
+        bash ~/.acme.sh/acme.sh --issue -d "$ym" --standalone -k ec-256 --server letsencrypt --insecure
+        bash ~/.acme.sh/acme.sh --install-cert -d "$ym" --key-file "$CERT_YUMING_DIR/private.key" --fullchain-file "$CERT_YUMING_DIR/cert.crt" --ecc
+    else
+        read -p "请输入解析完成的域名: " ym < /dev/tty
+        checkip || return 1
+        echo -e "请选择托管域名解析服务商：\n1. Cloudflare\n2. 腾讯云 DNSPod\n3. 阿里云 Aliyun"
+        read -p "请选择 [1-3]: " cd < /dev/tty
+        case "$cd" in
+            1 )
+                read -p "请选择 Cloudflare 验证方式 (1. Token / 2. Global API Key): " cf_c < /dev/tty
+                if [ "$cf_c" = "1" ]; then
+                    read -p "请输入 Cloudflare Account ID: " CFAccountID
+                    export CF_Account_ID="$CFAccountID"
+                    read -p "请输入 Cloudflare API Token: " CFToken
+                    export CF_Token="$CFToken"
+                else
+                    read -p "请输入 Cloudflare 注册邮箱: " CFemail
+                    export CF_Email="$CFemail"
+                    read -p "请输入 Cloudflare Global API Key: " GAK
+                    export CF_Key="$GAK"
+                fi
+                bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "${ym}" -k ec-256 --server letsencrypt --insecure
+                ;;
+            2 )
+                read -p "请输入腾讯云 DP_Id: " DPID
+                export DP_Id="$DPID"
+                read -p "请输入腾讯云 DP_Key: " DPKEY
+                export DP_Key="$DPKEY"
+                bash ~/.acme.sh/acme.sh --issue --dns dns_dp -d "${ym}" -k ec-256 --server letsencrypt --insecure
+                ;;
+            3 )
+                read -p "请输入阿里云 Ali_Key: " ALKEY
+                export Ali_Key="$ALKEY"
+                read -p "请输入阿里云 Ali_Secret: " ALSER
+                export Ali_Secret="$ALSER"
+                bash ~/.acme.sh/acme.sh --issue --dns dns_ali -d "${ym}" -k ec-256 --server letsencrypt --insecure
+                ;;
+        esac
+        bash ~/.acme.sh/acme.sh --install-cert -d "${ym}" --key-file "$CERT_YUMING_DIR/private.key" --fullchain-file "$CERT_YUMING_DIR/cert.crt" --ecc
+    fi
+
+    if [ -s "$CERT_YUMING_DIR/cert.crt" ] && [ -s "$CERT_YUMING_DIR/private.key" ]; then
+        echo "[√] 域名证书申请成功，已安全保存在 $CERT_YUMING_DIR"
+        HAS_DOMAIN="true"
+        DOMAIN_NAME="$ym"
+    else
+        echo "[-] 错误：证书申请失败！"
+        HAS_DOMAIN="false"
+        DOMAIN_NAME=""
+    fi
 }
 
 # ==========================================
@@ -128,113 +247,110 @@ action_manage_singbox() {
 }
 
 # ==========================================
-# 功能函数 7: 永哥风格多平台 ACME 证书申请模块
-# ==========================================
-action_acme_cert() {
-    echo -e "\n===================================="
-    echo "     永哥风格 ACME 域名证书申请向导   "
-    echo "===================================="
-    echo " 1. 不申请域名，仅使用自签证书"
-    echo " 2. Cloudflare API 托管模式申请域名证书"
-    echo " 3. Cloudflare 80 端口独立 standalone 模式申请域名证书"
-    echo " 4. 腾讯云 / 其它 DNS 模式"
-    echo "------------------------------------"
-    read -p "请选择申请方式 [1-4, 默认 1]: " acme_choice < /dev/tty
-    [ -z "$acme_choice" ] && acme_choice="1"
-
-    # 无论选啥，自签证书总是默认生成并存放在 /etc/sing-box/zhiqian/
-    echo "[+] 正在生成基础自签证书至 $CERT_ZHIQIAN_DIR ..."
-    openssl ecparam -genkey -name prime256v1 -out "$CERT_ZHIQIAN_DIR/private.key" 2>/dev/null
-    openssl req -new -x509 -days 36500 -key "$CERT_ZHIQIAN_DIR/private.key" -out "$CERT_ZHIQIAN_DIR/cert.pem" -subj "/CN=www.bing.com" 2>/dev/null
-
-    if [ "$acme_choice" = "1" ]; then
-        HAS_DOMAIN="false"
-        DOMAIN_NAME=""
-    else
-        read -p "请输入你的有效主域名 (例如 example.com): " DOMAIN_NAME < /dev/tty
-        if [ -n "$DOMAIN_NAME" ]; then
-            mkdir -p "$CERT_YUMING_DIR"
-            echo "[+] 正在针对域名 $DOMAIN_NAME 执行 ACME 证书申请，保存至 $CERT_YUMING_DIR ..."
-            curl https://get.acme.sh | sh -s email=admin@$DOMAIN_NAME 2>/dev/null
-            ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt 2>/dev/null
-            
-            if [ "$acme_choice" = "2" ]; then
-                read -p "请输入 Cloudflare Global API Key: " CF_KEY < /dev/tty
-                read -p "请输入 Cloudflare 注册邮箱: " CF_EMAIL < /dev/tty
-                export CF_Key="$CF_KEY"
-                export CF_Email="$CF_EMAIL"
-                ~/.acme.sh/acme.sh --issue --dns dns_cf -d "$DOMAIN_NAME" -d "*.$DOMAIN_NAME" -k ec-256 2>/dev/null
-            else
-                ~/.acme.sh/acme.sh --issue -d "$DOMAIN_NAME" --standalone -k ec-256 2>/dev/null
-            fi
-
-            ~/.acme.sh/acme.sh --install-cert -d "$DOMAIN_NAME" --ecc \
-                --fullchain-file "$CERT_YUMING_DIR/cert.crt" \
-                --key-file "$CERT_YUMING_DIR/private.key" 2>/dev/null
-            
-            HAS_DOMAIN="true"
-            echo "[√] 域名证书申请成功！"
-        else
-            HAS_DOMAIN="false"
-        fi
-    fi
-}
-
-# ==========================================
-# 功能函数 3: 全协议配置生成器 (双证书共存、独立不重复凭证)
+# 功能函数 3: 全协议配置生成器 (完整核心功能)
 # ==========================================
 action_generate_config() {
     echo -e "\n===================================="
     echo "   sing-box 旗舰全协议配置与凭证向导    "
     echo "===================================="
 
-    # 1. 证书向导（自签 + 可选域名证书）
-    action_acme_cert
+    # 1. 端口输入与范围检查 (20000-60000，逐个检查占用，冲突则重新输入或随机)
+    input_port_with_check() {
+        local proto_name=$1
+        local proto_type=$2
+        local user_input
+        while true; do
+            read -p "请输入 $proto_name 端口 (20000-60000，直接回车随机生成): " user_input < /dev/tty
+            if [ -z "$user_input" ]; then
+                local rp=$(get_random_port)
+                echo "[+] $proto_name 已自动随机生成可用端口: $rp"
+                echo "$rp"
+                return
+            elif [[ "$user_input" =~ ^[0-9]+$ ]] && [ "$user_input" -ge 20000 ] && [ "$user_input" -le 60000 ]; then
+                if check_port_free "$user_input" "$proto_type"; then
+                    echo "[-] 端口 $user_input 已被占用！请重新输入或直接回车由系统随机生成。"
+                else
+                    echo "$user_input"
+                    return
+                fi
+            else
+                echo "[-] 范围错误，请输入 20000 到 60000 之间的端口号。"
+            fi
+        done
+    }
 
-    # 定义双证书路径变量
+    echo "[+] 开始配置各个协议端口..."
+    P_ANYTLS_B=$(input_port_with_check "AnyTLS (Bing)" "tcp")
+    P_ANYTLS_R=$(input_port_with_check "AnyTLS (Reality)" "tcp")
+    P_HY2_B=$(input_port_with_check "Hysteria2 (Bing)" "udp")
+    P_HY2_Y=$(input_port_with_check "Hysteria2 (域名)" "udp")
+    P_VLESS_R=$(input_port_with_check "VLESS Reality" "tcp")
+    P_TUIC=$(input_port_with_check "TUIC v5" "udp")
+    P_XHTTP=$(input_port_with_check "VLESS XHTTP" "tcp")
+    P_MIERU=$(input_port_with_check "Mieru" "tcp")
+
+    # 2. 自签证书安装
+    echo "[+] 正在生成基础自签证书至 $CERT_ZHIQIAN_DIR ..."
+    openssl ecparam -genkey -name prime256v1 -out "$CERT_ZHIQIAN_DIR/private.key" 2>/dev/null
+    openssl req -new -x509 -days 36500 -key "$CERT_ZHIQIAN_DIR/private.key" -out "$CERT_ZHIQIAN_DIR/cert.pem" -subj "/CN=www.bing.com" 2>/dev/null
     ZHIQIAN_CERT="$CERT_ZHIQIAN_DIR/cert.pem"
     ZHIQIAN_KEY="$CERT_ZHIQIAN_DIR/private.key"
-    
-    if [ "$HAS_DOMAIN" = "true" ] && [ -f "$CERT_YUMING_DIR/cert.crt" ]; then
+
+    # 3. 询问是否注册域名证书
+    read -p "是否需要使用甬哥 ACME 脚本注册正经的域名证书？(y/n) [默认 n]: " do_acme < /dev/tty
+    if [ "$do_acme" = "y" ] || [ "$do_acme" = "Y" ]; then
+        run_yongge_acme
+    else
+        HAS_DOMAIN="false"
+        DOMAIN_NAME=""
+    fi
+
+    if [ "$HAS_DOMAIN" = "true" ] && [ -s "$CERT_YUMING_DIR/cert.crt" ]; then
         YUMING_CERT="$CERT_YUMING_DIR/cert.crt"
         YUMING_KEY="$CERT_YUMING_DIR/private.key"
     else
-        # 如果未成功申请域名证书，域名项降级使用自签证书
         YUMING_CERT="$ZHIQIAN_CERT"
         YUMING_KEY="$ZHIQIAN_KEY"
     fi
 
-    # 2. 为每个协议独立生成完全不重复的 UUID 与高强度独立密码
-    echo "[+] 正在为各个协议独立静默生成不重复的随机 UUID 与独立密码..."
-    UUID_VLESS_REALITY=$(cat /proc/sys/kernel/random/uuid)
-    UUID_XHTTP=$(cat /proc/sys/kernel/random/uuid)
-    UUID_TUIC=$(cat /proc/sys/kernel/random/uuid)
-    UUID_ANYTLS_R=$(cat /proc/sys/kernel/random/uuid)
-
-    PWD_ANYTLS_B=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
-    PWD_ANYTLS_R_ALT=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
-    PWD_HY2_B=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
-    PWD_HY2_Y=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16) # 已修复：不再借用 UUID
-    PWD_MIERU=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 14)
-
-    # 3. 生成 Reality 密钥对
+    # 4. VLESS Reality 密钥与短 ID 生成
+    echo "[+] 正在生成 VLESS-Reality 密钥对与 short_id..."
     R_KEYS=$(sing-box generate reality-keypair 2>/dev/null)
     R_PRIV=$(echo "$R_KEYS" | grep "PrivateKey" | awk '{print $2}' | tr -d '"')
     R_PUB=$(echo "$R_KEYS" | grep "PublicKey" | awk '{print $2}' | tr -d '"')
     [ -z "$R_PRIV" ] && R_PRIV="aEjTOLv8hSboBxvgt5drG-zoQAEkMHBrVwQspV-sZHg"
+    SHORT_ID=$(openssl rand -hex 8)
 
-    # 4. 动态随机分配空闲端口 (20000-60000)
-    echo "[+] 正在智能随机分配并检测空闲端口..."
-    P_ANYTLS_B=$(get_random_port)
-    P_ANYTLS_R=$(get_random_port)
-    P_HY2_B=$(get_random_port)
-    P_HY2_Y=$(get_random_port)
-    P_VLESS_R=$(get_random_port)
-    P_TUIC=$(get_random_port)
-    P_XHTTP=$(get_random_port)
-    P_MIERU=$(get_random_port)
+    # 5. 各协议用户名、UUID、密码输入（回车则独立随机生成）
+    input_credential_with_default() {
+        local prompt_name=$1
+        local is_uuid=$2
+        local val
+        read -p "请输入 $prompt_name (直接回车将随机生成): " val < /dev/tty
+        if [ -z "$val" ]; then
+            if [ "$is_uuid" = "true" ]; then
+                val=$(cat /proc/sys/kernel/random/uuid)
+            else
+                val=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
+            fi
+        fi
+        echo "$val"
+    }
 
-    # 5. 持久化保存所有独立凭证到 /etc/sing-box/xinxi/deploy_data.json
+    echo "[+] 开始配置各个协议凭证..."
+    USER_VLESS_REALITY=$(input_credential_with_default "VLESS Reality UUID" "true")
+    USER_XHTTP=$(input_credential_with_default "VLESS XHTTP UUID" "true")
+    USER_TUIC=$(input_credential_with_default "TUIC v5 UUID" "true")
+    USER_ANYTLS_R=$(input_credential_with_default "AnyTLS Reality 密码/UUID" "true")
+
+    PWD_ANYTLS_B=$(input_credential_with_default "AnyTLS (Bing) 密码" "false")
+    PWD_HY2_B=$(input_credential_with_default "Hysteria2 (Bing) 密码" "false")
+    PWD_HY2_Y=$(input_credential_with_default "Hysteria2 (域名) 密码" "false")
+    NAME_MIERU=$(input_credential_with_default "Mieru 用户名" "false")
+    PWD_MIERU=$(input_credential_with_default "Mieru 密码" "false")
+    [ -z "$NAME_MIERU" ] && NAME_MIERU="taikong"
+
+    # 6. 持久化保存所有数据到 /etc/sing-box/xinxi/deploy_data.json
     cat << EOF > "$DATA_JSON"
 {
   "server_ip": "$SERVER_IP",
@@ -242,17 +358,19 @@ action_generate_config() {
   "domain": "$DOMAIN_NAME",
   "reality_private_key": "$R_PRIV",
   "reality_public_key": "$R_PUB",
+  "short_id": "$SHORT_ID",
   "uuids": {
-    "vless_reality": "$UUID_VLESS_REALITY",
-    "xhttp": "$UUID_XHTTP",
-    "tuic": "$UUID_TUIC",
-    "anytls_reality": "$UUID_ANYTLS_R"
+    "vless_reality": "$USER_VLESS_REALITY",
+    "xhttp": "$USER_XHTTP",
+    "tuic": "$USER_TUIC",
+    "anytls_reality": "$USER_ANYTLS_R"
   },
   "passwords": {
     "anytls_bing": "$PWD_ANYTLS_B",
     "hy2_bing": "$PWD_HY2_B",
     "hy2_yuming": "$PWD_HY2_Y",
-    "mieru": "$PWD_MIERU"
+    "mieru_name": "$NAME_MIERU",
+    "mieru_pass": "$PWD_MIERU"
   },
   "ports": {
     "anytls_bing": $P_ANYTLS_B,
@@ -266,9 +384,9 @@ action_generate_config() {
   }
 }
 EOF
-    echo "[+] 所有独立凭证与配置数据已成功存入: $DATA_JSON"
+    echo "[√] 所有配置参数已成功持久化保存至: $DATA_JSON"
 
-    # 6. 写入标准 sing-box 配置文件（Bing/自签组用自签证书，Yuming/域名组用域名证书）
+    # 7. 写入标准配置文件
     cat << EOF > "$CONFIG_FILE"
 {
     "log": {
@@ -290,11 +408,11 @@ EOF
             "tag": "anytls-02-reality",
             "listen": "::",
             "listen_port": $P_ANYTLS_R,
-            "users": [{"password": "$UUID_ANYTLS_R"}],
+            "users": [{"password": "$USER_ANYTLS_R"}],
             "tls": {
                 "enabled": true,
                 "server_name": "apple.com",
-                "reality": {"enabled": true, "handshake": {"server": "apple.com", "server_port": 443}, "private_key": "$R_PRIV", "short_id": ["d1df3e44"]}
+                "reality": {"enabled": true, "handshake": {"server": "apple.com", "server_port": 443}, "private_key": "$R_PRIV", "short_id": ["$SHORT_ID"]}
             }
         },
         {
@@ -320,11 +438,11 @@ EOF
             "tag": "vless-reality-vision",
             "listen": "::",
             "listen_port": $P_VLESS_R,
-            "users": [{"uuid": "$UUID_VLESS_REALITY", "flow": "xtls-rprx-vision"}],
+            "users": [{"uuid": "$USER_VLESS_REALITY", "flow": "xtls-rprx-vision"}],
             "tls": {
                 "enabled": true,
                 "server_name": "www.lovelive-anime.jp",
-                "reality": {"enabled": true, "handshake": {"server": "www.lovelive-anime.jp", "server_port": 443}, "private_key": "$R_PRIV", "short_id": ["27dfe873147095d1"]}
+                "reality": {"enabled": true, "handshake": {"server": "www.lovelive-anime.jp", "server_port": 443}, "private_key": "$R_PRIV", "short_id": ["$SHORT_ID"]}
             }
         },
         {
@@ -332,7 +450,7 @@ EOF
             "tag": "tuicv5-01-bing",
             "listen": "::",
             "listen_port": $P_TUIC,
-            "users": [{"uuid": "$UUID_TUIC", "password": "$PWD_ANYTLS_B"}],
+            "users": [{"uuid": "$USER_TUIC", "password": "$PWD_ANYTLS_B"}],
             "congestion_control": "cubic",
             "tls": {"enabled": true, "server_name": "www.bing.com", "alpn": ["h3"], "certificate_path": "$ZHIQIAN_CERT", "key_path": "$ZHIQIAN_KEY"}
         },
@@ -341,11 +459,11 @@ EOF
             "tag": "vless-xhttp-reality",
             "listen": "::",
             "listen_port": $P_XHTTP,
-            "users": [{"uuid": "$UUID_XHTTP", "flow": ""}],
+            "users": [{"uuid": "$USER_XHTTP", "flow": ""}],
             "tls": {
                 "enabled": true,
                 "server_name": "www.lovelive-anime.jp",
-                "reality": {"enabled": true, "handshake": {"server": "www.lovelive-anime.jp", "server_port": 443}, "private_key": "$R_PRIV", "short_id": ["27dfe873147095d1"]}
+                "reality": {"enabled": true, "handshake": {"server": "www.lovelive-anime.jp", "server_port": 443}, "private_key": "$R_PRIV", "short_id": ["$SHORT_ID"]}
             },
             "transport": {"type": "xhttp", "path": "/", "mode": "auto", "x_padding_bytes": "100-1000"}
         },
@@ -354,7 +472,7 @@ EOF
             "tag": "mieru-01-tcp",
             "listen_port": $P_MIERU,
             "transport": "TCP",
-            "users": [{"name": "taikong", "password": "$PWD_MIERU"}],
+            "users": [{"name": "$NAME_MIERU", "password": "$PWD_MIERU"}],
             "traffic_pattern": "GgQIARAK", "mtu": 1400
         },
         {
@@ -362,7 +480,7 @@ EOF
             "tag": "mieru-02-udp",
             "listen_port": $P_MIERU,
             "transport": "UDP",
-            "users": [{"name": "taikong", "password": "$PWD_MIERU"}],
+            "users": [{"name": "$NAME_MIERU", "password": "$PWD_MIERU"}],
             "traffic_pattern": "GgQIARAK", "mtu": 1400
         }
     ],
@@ -386,9 +504,9 @@ EOF
     }
 }
 EOF
-    echo "[√] 旗舰配置文件写入成功！"
+    echo "[√] sing-box 配置文件写入成功！"
 
-    # 7. 注册 Systemd 服务
+    # 8. 注册并启动 Systemd 服务
     cat << EOF > /etc/systemd/system/sing-box.service
 [Unit]
 Description=sing-box service (Extended Multi-Protocol)
@@ -409,11 +527,18 @@ EOF
     systemctl daemon-reload
     systemctl enable --now sing-box
 
-    # 8. 防火墙联动
-    read -p "是否自动配置防火墙并放行所有协议端口？(y/n): " do_fw < /dev/tty
-    if [ "$do_fw" = "y" ]; then
+    # 9. 检查运行状态
+    if systemctl is-active --quiet sing-box; then
+        echo "[√] 恭喜！sing-box 服务已成功启动并正常运行！"
+    else
+        echo "[-] 警告：sing-box 启动可能异常，请通过菜单第 4 项查看运行日志。"
+    fi
+
+    # 10. 防火墙询问与带注释规则放行
+    read -p "是否需要安装并配置防火墙规则？(y/n): " do_fw < /dev/tty
+    if [ "$do_fw" = "y" ] || [ "$do_fw" = "Y" ]; then
         if command -v ufw &>/dev/null; then
-            echo "[+] 配置 Debian/UFW 防火墙规则..."
+            echo "[+] 检测到 Debian 系列，正在配置 UFW 防火墙..."
             ufw allow $P_ANYTLS_B/tcp comment "AnyTLS Bing 端口"
             ufw allow $P_ANYTLS_R/tcp comment "AnyTLS Reality 端口"
             ufw allow $P_HY2_B/udp comment "Hysteria2 Bing 端口"
@@ -423,9 +548,10 @@ EOF
             ufw allow $P_XHTTP/tcp comment "VLESS XHTTP 端口"
             ufw allow $P_MIERU/tcp comment "Mieru TCP 端口"
             ufw allow $P_MIERU/udp comment "Mieru UDP 端口"
+            ufw --force enable
             ufw reload
         elif command -v firewall-cmd &>/dev/null; then
-            echo "[+] 配置 RedHat/Firewalld 防火墙规则..."
+            echo "[+] 检测到 RedHat 系列，正在配置 Firewalld 防火墙..."
             firewall-cmd --permanent --add-port=$P_ANYTLS_B/tcp
             firewall-cmd --permanent --add-port=$P_ANYTLS_R/tcp
             firewall-cmd --permanent --add-port=$P_HY2_B/udp
@@ -437,19 +563,33 @@ EOF
             firewall-cmd --permanent --add-port=$P_MIERU/udp
             firewall-cmd --reload
         fi
-        echo "[√] 防火墙端口放行完毕！"
+        echo "[√] 防火墙规则带注释放行完毕！"
     fi
 }
 
 # ==========================================
-# 功能函数 5: 显示多客户端订阅配置
+# 功能函数 4: 查看状态与日志
+# ==========================================
+action_check_status() {
+    echo -e "\n===================================="
+    echo "       sing-box 运行状态与日志        "
+    echo "===================================="
+    systemctl status sing-box --no-pager
+    echo "------------------------------------"
+    echo "最近 10 行运行日志:"
+    journalctl -u sing-box -n 10 --no-pager
+    echo "===================================="
+}
+
+# ==========================================
+# 功能函数 5: 显示三大客户端订阅与配置
 # ==========================================
 action_show_subscription() {
     echo -e "\n===================================="
-    echo "       多客户端订阅与节点信息         "
+    echo "       多客户端订阅与节点配置         "
     echo "===================================="
     if [ ! -f "$DATA_JSON" ]; then
-        echo "[-] 错误：未找到持久化配置数据 ($DATA_JSON)，请先执行第 3 项生成配置！"
+        echo "[-] 错误：未找到持久化数据文件 ($DATA_JSON)，请先执行第 3 项生成配置！"
         return
     fi
 
@@ -462,28 +602,34 @@ action_show_subscription() {
         SUB_PREFIX="http://$SERVER_IP"
     fi
 
-    echo "【持久化信息存储目录】: $DATA_JSON"
-    echo "【订阅地址前缀】      : $SUB_PREFIX"
+    PUB_KEY=$(grep -o '"reality_public_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$DATA_JSON" | awk -F'"' '{print $4}')
+    SHORT_ID_VAL=$(grep -o '"short_id"[[:space:]]*:[[:space:]]*"[^"]*"' "$DATA_JSON" | awk -F'"' '{print $4}')
+    VLESS_UUID=$(grep -A 5 'uuids' "$DATA_JSON" | grep 'vless_reality' | awk -F'"' '{print $4}')
+    VLESS_PORT=$(grep -A 10 'ports' "$DATA_JSON" | grep 'vless_reality' | awk '{print $2}' | tr -d ',')
+
+    echo "【当前持久化数据存储路径】: $DATA_JSON"
+    echo "【订阅协议前缀】          : $SUB_PREFIX"
     echo "------------------------------------"
-    echo "【1. 核心凭证信息摘要】"
-    echo "服务器 IP         : $SERVER_IP"
-    echo "VLESS Reality UUID: $(grep -A 5 'uuids' "$DATA_JSON" | grep 'vless_reality' | awk -F'"' '{print $4}')"
-    echo "XHTTP UUID        : $(grep -A 5 'uuids' "$DATA_JSON" | grep 'xhttp' | awk -F'"' '{print $4}')"
-    echo "TUIC UUID         : $(grep -A 5 'uuids' "$DATA_JSON" | grep 'tuic' | awk -F'"' '{print $4}')"
+    echo "【1. V2Ray / 常用客户端通用链接】"
+    echo "vless://$VLESS_UUID@$SERVER_IP:$VLESS_PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.lovelive-anime.jp&fp=chrome&pbk=$PUB_KEY&sid=$SHORT_ID_VAL&type=tcp#VLESS-Reality-$SERVER_IP"
     echo "------------------------------------"
-    echo "【2. Mihomo (Meta) 订阅片段格式预览】"
+    echo "【2. Mihomo (Meta) 订阅节点片段】"
     echo "proxies:"
     echo "  - name: VLESS-Reality-$SERVER_IP"
     echo "    type: vless"
     echo "    server: $SERVER_IP"
-    echo "    port: $(grep -A 10 'ports' "$DATA_JSON" | grep 'vless_reality' | awk '{print $2}' | tr -d ',')"
-    echo "    uuid: $(grep -A 5 'uuids' "$DATA_JSON" | grep 'vless_reality' | awk -F'"' '{print $4}')"
+    echo "    port: $VLESS_PORT"
+    echo "    uuid: $VLESS_UUID"
     echo "    network: tcp"
     echo "    tls: true"
     echo "    servername: www.lovelive-anime.jp"
+    echo "    flow: xtls-rprx-vision"
     echo "    reality-opts:"
-    echo "      public-key: $(grep -o '"reality_public_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$DATA_JSON" | awk -F'"' '{print $4}')"
-    echo "      short-id: 27dfe873147095d1"
+    echo "      public-key: $PUB_KEY"
+    echo "      short-id: $SHORT_ID_VAL"
+    echo "------------------------------------"
+    echo "【3. Sing-box 客户端订阅 / JSON 片段提示】"
+    echo "各项凭证与完整配置已自动写入 /etc/sing-box/config.json"
     echo "===================================="
 }
 
@@ -506,11 +652,11 @@ show_menu() {
     echo " 请选择要执行的功能操作："
     echo "   1. 执行系统初始化与安全加固"
     echo "   2. 安装/更新 sing-box (shtorm-7 扩展版)"
-    echo "   3. 生成全协议服务端配置 (含双证书、独立密码、保存在 /etc/sing-box/xinxi/)"
+    echo "   3. 生成全协议服务端配置 (含端口检查、双证书、独立凭证、ACME)"
     echo "   4. 查看 sing-box 运行状态与日志"
-    echo "   5. 显示多客户端订阅配置 (sing-box / mihomo / v2ray)"
-    echo "   6. 修改服务端配置并生成对应客户端配置 [预留]"
-    echo "   7. 申请/管理 ACME 域名 SSL 证书 (永哥多平台逻辑)"
+    echo "   5. 显示多客户端订阅配置 (v2ray / mihomo / sing-box)"
+    echo "   6. 修改服务端配置 [预留]"
+    echo "   7. 独立运行甬哥 ACME 证书申请模块"
     echo "   8. WireGuard 与 WARP 内容管理 [预留]"
     echo "   9. 策略分流规则管理 [预留]"
     echo "   0. 退出脚本"
@@ -521,10 +667,10 @@ show_menu() {
         1) action_init_security ;;
         2) action_manage_singbox ;;
         3) action_generate_config ;;
-        4) action_check_singbox_status 2>/dev/null || systemctl status sing-box ;;
+        4) action_check_status ;;
         5) action_show_subscription ;;
         6) echo "[!] 正在开发中..." ;;
-        7) action_acme_cert ;;
+        7) run_yongge_acme ;;
         8) echo "[!] 正在开发中..." ;;
         9) echo "[!] 正在开发中..." ;;
         0) exit 0 ;;
