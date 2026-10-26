@@ -6,8 +6,8 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 数据持久化与独立目录
-DATA_DIR="/etc/taikong"
+# 目录与路径规范
+DATA_DIR="/etc/sing-box/xinxi"
 CONFIG_FILE="/etc/sing-box/config.json"
 DATA_JSON="$DATA_DIR/deploy_data.json"
 CERT_YUMING_DIR="/etc/sing-box/yuming"
@@ -134,27 +134,27 @@ action_acme_cert() {
     echo -e "\n===================================="
     echo "     永哥风格 ACME 域名证书申请向导   "
     echo "===================================="
-    echo " 1. 不申请域名，使用自签证书 (默认存放在 /etc/sing-box/zhiqian/)"
-    echo " 2. Cloudflare API 托管模式申请证书"
-    echo " 3. Cloudflare 80 端口独立 standalone 模式申请"
+    echo " 1. 不申请域名，仅使用自签证书"
+    echo " 2. Cloudflare API 托管模式申请域名证书"
+    echo " 3. Cloudflare 80 端口独立 standalone 模式申请域名证书"
     echo " 4. 腾讯云 / 其它 DNS 模式"
     echo "------------------------------------"
     read -p "请选择申请方式 [1-4, 默认 1]: " acme_choice < /dev/tty
     [ -z "$acme_choice" ] && acme_choice="1"
 
+    # 无论选啥，自签证书总是默认生成并存放在 /etc/sing-box/zhiqian/
+    echo "[+] 正在生成基础自签证书至 $CERT_ZHIQIAN_DIR ..."
+    openssl ecparam -genkey -name prime256v1 -out "$CERT_ZHIQIAN_DIR/private.key" 2>/dev/null
+    openssl req -new -x509 -days 36500 -key "$CERT_ZHIQIAN_DIR/private.key" -out "$CERT_ZHIQIAN_DIR/cert.pem" -subj "/CN=www.bing.com" 2>/dev/null
+
     if [ "$acme_choice" = "1" ]; then
-        echo "[+] 已选择：使用自签证书，正在生成至 $CERT_ZHIQIAN_DIR ..."
-        openssl ecparam -genkey -name prime256v1 -out "$CERT_ZHIQIAN_DIR/private.key" 2>/dev/null
-        openssl req -new -x509 -days 36500 -key "$CERT_ZHIQIAN_DIR/private.key" -out "$CERT_ZHIQIAN_DIR/cert.pem" -subj "/CN=www.bing.com" 2>/dev/null
-        CERT_PATH="$CERT_ZHIQIAN_DIR/cert.pem"
-        KEY_PATH="$CERT_ZHIQIAN_DIR/private.key"
         HAS_DOMAIN="false"
         DOMAIN_NAME=""
     else
         read -p "请输入你的有效主域名 (例如 example.com): " DOMAIN_NAME < /dev/tty
         if [ -n "$DOMAIN_NAME" ]; then
             mkdir -p "$CERT_YUMING_DIR"
-            echo "[+] 正在针对域名 $DOMAIN_NAME 执行 ACME 证书申请..."
+            echo "[+] 正在针对域名 $DOMAIN_NAME 执行 ACME 证书申请，保存至 $CERT_YUMING_DIR ..."
             curl https://get.acme.sh | sh -s email=admin@$DOMAIN_NAME 2>/dev/null
             ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt 2>/dev/null
             
@@ -172,39 +172,49 @@ action_acme_cert() {
                 --fullchain-file "$CERT_YUMING_DIR/cert.crt" \
                 --key-file "$CERT_YUMING_DIR/private.key" 2>/dev/null
             
-            CERT_PATH="$CERT_YUMING_DIR/cert.crt"
-            KEY_PATH="$CERT_YUMING_DIR/private.key"
             HAS_DOMAIN="true"
-            echo "[√] 域名证书申请成功，已保存至 $CERT_YUMING_DIR"
+            echo "[√] 域名证书申请成功！"
         else
             HAS_DOMAIN="false"
-            CERT_PATH="$CERT_ZHIQIAN_DIR/cert.pem"
-            KEY_PATH="$CERT_ZHIQIAN_DIR/private.key"
         fi
     fi
 }
 
 # ==========================================
-# 功能函数 3: 全协议配置生成器 (独立凭证、静默随机生成)
+# 功能函数 3: 全协议配置生成器 (双证书共存、独立不重复凭证)
 # ==========================================
 action_generate_config() {
     echo -e "\n===================================="
     echo "   sing-box 旗舰全协议配置与凭证向导    "
     echo "===================================="
 
-    # 1. 证书向导
+    # 1. 证书向导（自签 + 可选域名证书）
     action_acme_cert
 
-    # 2. 为每个协议独立、静默生成完全不重复的 UUID 与独立密码
-    echo "[+] 正在为各个协议独立静默生成不重复的随机 UUID 与高强度密码..."
+    # 定义双证书路径变量
+    ZHIQIAN_CERT="$CERT_ZHIQIAN_DIR/cert.pem"
+    ZHIQIAN_KEY="$CERT_ZHIQIAN_DIR/private.key"
+    
+    if [ "$HAS_DOMAIN" = "true" ] && [ -f "$CERT_YUMING_DIR/cert.crt" ]; then
+        YUMING_CERT="$CERT_YUMING_DIR/cert.crt"
+        YUMING_KEY="$CERT_YUMING_DIR/private.key"
+    else
+        # 如果未成功申请域名证书，域名项降级使用自签证书
+        YUMING_CERT="$ZHIQIAN_CERT"
+        YUMING_KEY="$ZHIQIAN_KEY"
+    fi
+
+    # 2. 为每个协议独立生成完全不重复的 UUID 与高强度独立密码
+    echo "[+] 正在为各个协议独立静默生成不重复的随机 UUID 与独立密码..."
     UUID_VLESS_REALITY=$(cat /proc/sys/kernel/random/uuid)
     UUID_XHTTP=$(cat /proc/sys/kernel/random/uuid)
     UUID_TUIC=$(cat /proc/sys/kernel/random/uuid)
     UUID_ANYTLS_R=$(cat /proc/sys/kernel/random/uuid)
 
     PWD_ANYTLS_B=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
+    PWD_ANYTLS_R_ALT=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
     PWD_HY2_B=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
-    PWD_HY2_Y=$(cat /proc/sys/kernel/random/uuid)
+    PWD_HY2_Y=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16) # 已修复：不再借用 UUID
     PWD_MIERU=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 14)
 
     # 3. 生成 Reality 密钥对
@@ -224,7 +234,7 @@ action_generate_config() {
     P_XHTTP=$(get_random_port)
     P_MIERU=$(get_random_port)
 
-    # 5. 持久化保存所有独立凭证到 deploy_data.json
+    # 5. 持久化保存所有独立凭证到 /etc/sing-box/xinxi/deploy_data.json
     cat << EOF > "$DATA_JSON"
 {
   "server_ip": "$SERVER_IP",
@@ -256,9 +266,9 @@ action_generate_config() {
   }
 }
 EOF
-    echo "[+] 所有独立凭证与端口数据已持久化保存至: $DATA_JSON"
+    echo "[+] 所有独立凭证与配置数据已成功存入: $DATA_JSON"
 
-    # 6. 写入标准 sing-box 配置文件
+    # 6. 写入标准 sing-box 配置文件（Bing/自签组用自签证书，Yuming/域名组用域名证书）
     cat << EOF > "$CONFIG_FILE"
 {
     "log": {
@@ -273,7 +283,7 @@ EOF
             "listen_port": $P_ANYTLS_B,
             "users": [{"password": "$PWD_ANYTLS_B"}],
             "padding_scheme": ["stop=10", "0=30-30", "1=100-400,c,10-10", "2=200-300,c,200-300,c,200-300", "3=9-9", "4-9=50-100"],
-            "tls": {"enabled": true, "certificate_path": "$CERT_PATH", "key_path": "$KEY_PATH"}
+            "tls": {"enabled": true, "certificate_path": "$ZHIQIAN_CERT", "key_path": "$ZHIQIAN_KEY"}
         },
         {
             "type": "anytls",
@@ -294,7 +304,7 @@ EOF
             "listen_port": $P_HY2_B,
             "users": [{"password": "$PWD_HY2_B"}],
             "ignore_client_bandwidth": false,
-            "tls": {"enabled": true, "alpn": ["h3"], "certificate_path": "$CERT_PATH", "key_path": "$KEY_PATH"}
+            "tls": {"enabled": true, "alpn": ["h3"], "certificate_path": "$ZHIQIAN_CERT", "key_path": "$ZHIQIAN_KEY"}
         },
         {
             "type": "hysteria2",
@@ -303,7 +313,7 @@ EOF
             "listen_port": $P_HY2_Y,
             "users": [{"password": "$PWD_HY2_Y"}],
             "ignore_client_bandwidth": false,
-            "tls": {"enabled": true, "alpn": ["h3"], "certificate_path": "$CERT_PATH", "key_path": "$KEY_PATH"}
+            "tls": {"enabled": true, "alpn": ["h3"], "certificate_path": "$YUMING_CERT", "key_path": "$YUMING_KEY"}
         },
         {
             "type": "vless",
@@ -324,7 +334,7 @@ EOF
             "listen_port": $P_TUIC,
             "users": [{"uuid": "$UUID_TUIC", "password": "$PWD_ANYTLS_B"}],
             "congestion_control": "cubic",
-            "tls": {"enabled": true, "server_name": "www.bing.com", "alpn": ["h3"], "certificate_path": "$CERT_PATH", "key_path": "$KEY_PATH"}
+            "tls": {"enabled": true, "server_name": "www.bing.com", "alpn": ["h3"], "certificate_path": "$ZHIQIAN_CERT", "key_path": "$ZHIQIAN_KEY"}
         },
         {
             "type": "vless",
@@ -439,7 +449,7 @@ action_show_subscription() {
     echo "       多客户端订阅与节点信息         "
     echo "===================================="
     if [ ! -f "$DATA_JSON" ]; then
-        echo "[-] 错误：未找到持久化配置数据，请先执行第 3 项生成配置！"
+        echo "[-] 错误：未找到持久化配置数据 ($DATA_JSON)，请先执行第 3 项生成配置！"
         return
     fi
 
@@ -452,9 +462,10 @@ action_show_subscription() {
         SUB_PREFIX="http://$SERVER_IP"
     fi
 
-    echo "【订阅地址前缀】: $SUB_PREFIX"
+    echo "【持久化信息存储目录】: $DATA_JSON"
+    echo "【订阅地址前缀】      : $SUB_PREFIX"
     echo "------------------------------------"
-    echo "【1. 各协议独立凭证信息摘要】"
+    echo "【1. 核心凭证信息摘要】"
     echo "服务器 IP         : $SERVER_IP"
     echo "VLESS Reality UUID: $(grep -A 5 'uuids' "$DATA_JSON" | grep 'vless_reality' | awk -F'"' '{print $4}')"
     echo "XHTTP UUID        : $(grep -A 5 'uuids' "$DATA_JSON" | grep 'xhttp' | awk -F'"' '{print $4}')"
@@ -495,7 +506,7 @@ show_menu() {
     echo " 请选择要执行的功能操作："
     echo "   1. 执行系统初始化与安全加固"
     echo "   2. 安装/更新 sing-box (shtorm-7 扩展版)"
-    echo "   3. 生成全协议服务端配置 (含独立随机凭证、ACME、持久化)"
+    echo "   3. 生成全协议服务端配置 (含双证书、独立密码、保存在 /etc/sing-box/xinxi/)"
     echo "   4. 查看 sing-box 运行状态与日志"
     echo "   5. 显示多客户端订阅配置 (sing-box / mihomo / v2ray)"
     echo "   6. 修改服务端配置并生成对应客户端配置 [预留]"
