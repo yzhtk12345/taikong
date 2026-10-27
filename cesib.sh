@@ -21,7 +21,7 @@ is_port_in_use() {
 }
 
 # ==========================================
-# 功能函数 1: 交互获取 9 个节点端口并持久化保存 (含防占用检测)
+# 功能函数 1: 交互获取 9 个节点端口并持久化保存 (含防占用检测与幂等检查)
 # ==========================================
 action_input_ports() {
     echo -e "\n===================================="
@@ -41,6 +41,25 @@ action_input_ports() {
         "mieru-01-tcp"
         "mieru-02-udp"
     )
+
+    # 检查是否已存在端口配置
+    EXIST_PORTS=0
+    for node in "${nodes[@]}"; do
+        [ -f "/etc/sing-box/value/$node" ] && EXIST_PORTS=$((EXIST_PORTS + 1))
+    done
+
+    if [ "$EXIST_PORTS" -gt 0 ]; then
+        read -p "[!] 检测到系统已存在历史端口配置，是否需要重新生成？(y/n，默认n): " re_ports < /dev/tty
+        if [ "$re_ports" != "y" ]; then
+            echo "[+] 已跳过端口重新生成，将保留并使用现有端口配置。"
+            return
+        else
+            echo "[+] 正在清理旧端口配置..."
+            for node in "${nodes[@]}"; do
+                rm -f "/etc/sing-box/value/$node"
+            done
+        fi
+    fi
 
     for node in "${nodes[@]}" ; do
         # 寻找一个未被系统占用的随机端口作为默认推荐
@@ -221,12 +240,22 @@ action_setup_firewall() {
 }
 
 # ==========================================
-# 功能函数 3: 生成 Hysteria2 自签证书
+# 功能函数 3: 生成 Hysteria2 自签证书 (含幂等检查)
 # ==========================================
 action_gen_hy2_cert() {
     echo -e "\n===================================="
     echo "  开始生成：Hysteria2 自签证书"
     echo "===================================="
+
+    if [ -f /etc/sing-box/ziqian/private.key ] && [ -f /etc/sing-box/ziqian/cert.pem ]; then
+        read -p "[!] 检测到已存在 Hysteria2 自签证书，是否需要重新生成？(y/n，默认n): " re_cert < /dev/tty
+        if [ "$re_cert" != "y" ]; then
+            echo "[+] 已跳过证书重新生成，将保留并使用现有证书。"
+            echo " - 私钥路径 : /etc/sing-box/ziqian/private.key"
+            echo " - 证书路径 : /etc/sing-box/ziqian/cert.pem"
+            return
+        fi
+    fi
 
     mkdir -p /etc/sing-box/ziqian
     openssl ecparam -genkey -name prime256v1 -out /etc/sing-box/ziqian/private.key
@@ -238,7 +267,7 @@ action_gen_hy2_cert() {
 }
 
 # ==========================================
-# 功能函数 4: 生成 Reality 秘钥对
+# 功能函数 4: 生成 Reality 秘钥对 (含幂等检查)
 # ==========================================
 action_gen_reality_keys() {
     echo -e "\n===================================="
@@ -256,6 +285,20 @@ action_gen_reality_keys() {
         "vless-reality-vision"
         "vless-xhttp-reality"
     )
+
+    # 检查是否已存在秘钥对
+    EXIST_KEYS=0
+    for node in "${reality_nodes[@]}"; do
+        [ -f "/etc/sing-box/value/${node}_private.key" ] && EXIST_KEYS=$((EXIST_KEYS + 1))
+    done
+
+    if [ "$EXIST_KEYS" -gt 0 ]; then
+        read -p "[!] 检测到系统已存在历史 Reality 秘钥对，是否需要重新生成？(y/n，默认n): " re_keys < /dev/tty
+        if [ "$re_keys" != "y" ]; then
+            echo "[+] 已跳过 Reality 秘钥对重新生成，将保留并使用现有秘钥。"
+            return
+        fi
+    fi
 
     for node in "${reality_nodes[@]}"; do
         echo "[+] 正在为 $node 生成独立 Reality 秘钥对..."
@@ -281,7 +324,7 @@ action_gen_reality_keys() {
 }
 
 # ==========================================
-# 功能函数 5: 手动输入或随机生成 30 位密码
+# 功能函数 5: 手动输入或随机生成 30 位密码 (含幂等检查)
 # ==========================================
 action_input_passwords() {
     echo -e "\n===================================="
@@ -297,6 +340,20 @@ action_input_passwords() {
         "mieru-01-tcp"
         "mieru-02-udp"
     )
+
+    # 检查是否已存在密码配置
+    EXIST_PWDS=0
+    for node in "${pwd_nodes[@]}"; do
+        [ -f "/etc/sing-box/value/${node}_password" ] && EXIST_PWDS=$((EXIST_PWDS + 1))
+    done
+
+    if [ "$EXIST_PWDS" -gt 0 ]; then
+        read -p "[!] 检测到系统已存在历史节点密码配置，是否需要重新生成？(y/n，默认n): " re_pwds < /dev/tty
+        if [ "$re_pwds" != "y" ]; then
+            echo "[+] 已跳过密码重新生成，将保留并使用现有密码配置。"
+            return
+        fi
+    fi
 
     for node in "${pwd_nodes[@]}"; do
         rand_pwd=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 30)
@@ -319,6 +376,45 @@ action_input_passwords() {
 }
 
 # ==========================================
+# 功能函数 6: 输入或随机生成代理用户名 (含幂等检查)
+# ==========================================
+action_input_username() {
+    echo -e "\n===================================="
+    echo "  开始配置：输入或随机生成代理用户名"
+    echo "===================================="
+
+    mkdir -p /etc/sing-box/value
+    uname_file="/etc/sing-box/value/proxy_username"
+
+    if [ -f "$uname_file" ]; then
+        current_uname=$(cat "$uname_file")
+        read -p "[!] 检测到已存在代理用户名 [$current_uname]，是否需要重新生成？(y/n，默认n): " re_uname < /dev/tty
+        if [ "$re_uname" != "y" ]; then
+            echo "[+] 已跳过用户名重新生成，将保留并使用现有用户名。"
+            return
+        fi
+    fi
+
+    rand_uname="user_$(tr -dc 'a-z0-9' < /dev/urandom | head -c 6)"
+    while true; do
+        read -p "请输入代理用户名 (直接回车随机生成 [$rand_uname]): " input_uname < /dev/tty
+        if [ -z "$input_uname" ]; then
+            username="$rand_uname"
+            echo "[+] 已自动随机生成用户名: $username"
+            break
+        elif [[ "$input_uname" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            username="$input_uname"
+            break
+        else
+            echo "[-] 格式错误，用户名仅支持字母、数字、下划线及横杠。"
+        fi
+    done
+
+    echo "$username" > "$uname_file"
+    echo "[√] 代理用户名 [$username] 已成功保存至 $uname_file"
+}
+
+# ==========================================
 # 测试菜单主循环
 # ==========================================
 show_test_menu() {
@@ -326,14 +422,15 @@ show_test_menu() {
     echo "=================================================="
     echo "         功能函数扩展与测试工具箱菜单            "
     echo "=================================================="
-    echo " 1. 配置 9 个节点端口 (带防占用检测)"
+    echo " 1. 配置 9 个节点端口 (带防占用与幂等检查)"
     echo " 2. 检测/安装防火墙并按需放行 TCP/UDP (带备注)"
-    echo " 3. 生成 Hysteria2 自签证书"
-    echo " 4. 生成 Reality 独立协议秘钥对"
-    echo " 5. 配置节点密码/Token (支持随机 30 位)"
+    echo " 3. 生成 Hysteria2 自签证书 (带幂等检查)"
+    echo " 4. 生成 Reality 独立协议秘钥对 (带幂等检查)"
+    echo " 5. 配置节点密码/Token (支持随机 30 位/带幂等检查)"
+    echo " 6. 配置代理用户名 (支持随机 10 位/带幂等检查)"
     echo " 0. 退出脚本"
     echo "=================================================="
-    read -p "请输入选项数字 [0-5]: " choice < /dev/tty
+    read -p "请输入选项数字 [0-6]: " choice < /dev/tty
 
     case "$choice" in
         1)
@@ -358,6 +455,11 @@ show_test_menu() {
             ;;
         5)
             action_input_passwords
+            echo ""
+            read -p "按回车键返回主菜单..." < /dev/tty
+            ;;
+        6)
+            action_input_username
             echo ""
             read -p "按回车键返回主菜单..." < /dev/tty
             ;;
