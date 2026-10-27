@@ -7,7 +7,21 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # ==========================================
-# 功能函数 A (第1个): 交互获取 9 个节点端口并持久化保存
+# 辅助函数: 检查端口是否被占用
+# ==========================================
+is_port_in_use() {
+    local p=$1
+    if command -v ss &>/dev/null; then
+        ss -tuln | grep -qE ":$p\b"
+    elif command -v netstat &>/dev/null; then
+        netstat -tuln | grep -qE ":$p\b"
+    else
+        false
+    fi
+}
+
+# ==========================================
+# 功能函数 A (第1个): 交互获取 9 个节点端口并持久化保存 (含防占用检测)
 # ==========================================
 action_input_ports() {
     echo -e "\n===================================="
@@ -28,15 +42,26 @@ action_input_ports() {
         "mieru-02-udp"
     )
 
-    for node in "${nodes[@]}"; do
-        rand_port=$((RANDOM % 40001 + 20000))
+    for node in "${nodes[@]}" ; do
+        # 寻找一个未被系统占用的随机端口作为默认推荐
+        while true; do
+            rand_port=$((RANDOM % 40001 + 20000))
+            if ! is_port_in_use "$rand_port"; then
+                break
+            fi
+        done
+
         while true; do
             read -p "请为 $node 提供端口，范围在20000-60000之间，回车随机生成 [$rand_port]: " input_port < /dev/tty
             if [ -z "$input_port" ]; then
                 port="$rand_port"
-                echo "[+] 已自动随机生成端口: $port"
+                echo "[+] 已自动随机生成未占用端口: $port"
                 break
             elif [[ "$input_port" =~ ^[0-9]+$ ]] && [ "$input_port" -ge 20000 ] && [ "$input_port" -le 60000 ]; then
+                if is_port_in_use "$input_port"; then
+                    echo "[-] 警告：端口 $input_port 当前已被系统其他服务占用，请更换一个端口！"
+                    continue
+                fi
                 port="$input_port"
                 break
             else
@@ -189,7 +214,7 @@ show_test_menu() {
     echo "=================================================="
     echo "         端口配置与防火墙功能测试菜单            "
     echo "=================================================="
-    echo " 1. 运行函数 1：输入或随机生成 9 个节点端口"
+    echo " 1. 运行函数 1：输入或随机生成 9 个节点端口(带防占用检测)"
     echo " 2. 运行函数 2：检测/安装防火墙并自动放行端口(带备注)"
     echo " 0. 退出脚本"
     echo "=================================================="
