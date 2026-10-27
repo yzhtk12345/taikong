@@ -147,5 +147,3 @@ action_setup_firewall() {
         echo "[√] Firewalld 防火墙规则配置完毕！"
     fi
 }
-action_input_ports
-action_setup_firewall
