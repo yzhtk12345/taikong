@@ -579,9 +579,9 @@ action_generate_config_json() {
                         "server": "$srv_vxr",
                         "server_port": 443
                     },
-                    "private_key": "$pri_vvr",
+                    "private_key": "$pri_vxr",
                     "short_id": [
-                        "$sid_vvr"
+                        "$sid_vxr"
                     ]
                 }
             },
@@ -777,9 +777,16 @@ action_generate_client_configs() {
 
     mkdir -p /etc/sing-box/kehu
 
-    # 获取公网 IP
+    # 获取公网 IP（默认项）
     PUBLIC_IP=$(curl -s ifconfig.me || curl -s api.ipify.org || hostname -I | awk '{print $1}')
     [ -z "$PUBLIC_IP" ] && PUBLIC_IP="YOUR_SERVER_IP"
+
+    # 智能检查是否有域名证书（若有则提取 CN 域名作为域名节点的连接地址）
+    HY2_DOMAIN_SERVER="$PUBLIC_IP"
+    if [ -f /root/ygkkkca/cert.crt ]; then
+        local extracted_domain=$(openssl x509 -noout -subject -in /root/ygkkkca/cert.crt 2>/dev/null | sed -n 's/.*CN[[:space:]]*=[[:space:]]*\([^,]*\).*/\1/p')
+        [ -n "$extracted_domain" ] && HY2_DOMAIN_SERVER="$extracted_domain"
+    fi
 
     read_val() {
         local file="/etc/sing-box/value/$1"
@@ -830,7 +837,7 @@ action_generate_client_configs() {
     cat << EOF > /etc/sing-box/kehu/v2ray_links.txt
 ==================================================
  sing-box 9 节点客户端分享与订阅合计
- 服务器IP: $PUBLIC_IP
+ 服务器IP: $PUBLIC_IP (域名节点: $HY2_DOMAIN_SERVER)
 ==================================================
 
 1. anytls-01-bing (Port: $p_any1)
@@ -843,7 +850,7 @@ anytls://$pw_any2@$PUBLIC_IP:$p_any2?security=tls&sni=$srv_any2&pbk=$pub_any2&si
 hysteria2://$pw_hy1@$PUBLIC_IP:$p_hy1?insecure=1&sni=www.bing.com#hysteria2-01-bing
 
 4. hysteria2-02-yuming (Port: $p_hy2)
-hysteria2://$pw_hy2@$PUBLIC_IP:$p_hy2?sni=www.bing.com#hysteria2-02-yuming
+hysteria2://$pw_hy2@$HY2_DOMAIN_SERVER:$p_hy2?insecure=1&sni=$HY2_DOMAIN_SERVER#hysteria2-02-yuming
 
 5. vless-reality-vision (Port: $p_vvr)
 vless://$uuid_vvr@$PUBLIC_IP:$p_vvr?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$srv_vvr&pbk=$pub_vvr&sid=$sid_vvr&type=tcp#vless-reality-vision
@@ -900,9 +907,10 @@ proxies:
 
   - name: "hysteria2-02-yuming"
     type: hysteria2
-    server: $PUBLIC_IP
+    server: $HY2_DOMAIN_SERVER
     port: $p_hy2
     password: "$pw_hy2"
+    sni: "$HY2_DOMAIN_SERVER"
     skip-cert-verify: true
 
   - name: "vless-reality-vision"
@@ -941,12 +949,30 @@ proxies:
     skip-cert-verify: true
     congestion-control: cubic
 
+  - name: "mieru-01-tcp"
+    type: mieru
+    server: $PUBLIC_IP
+    port: $p_m1
+    username: "$u_m1"
+    password: "$pw_m1"
+    transport: TCP
+    mtu: 1400
+
+  - name: "mieru-02-udp"
+    type: mieru
+    server: $PUBLIC_IP
+    port: $p_m2
+    username: "$u_m2"
+    password: "$pw_m2"
+    transport: UDP
+    mtu: 1400
+
 rule-providers: {}
 rules:
   - MATCH,DIRECT
 EOF
 
-    # 3. 生成 Sing-box 客户端配置 (/etc/sing-box/kehu/client_config.json)
+    # 3. 生成 Sing-box 客户端配置 (/etc/sing-box/kehu/client_config.json) - 完整包含 9 个协议
     cat << EOF > /etc/sing-box/kehu/client_config.json
 {
   "log": {
@@ -997,12 +1023,13 @@ EOF
     {
       "type": "hysteria2",
       "tag": "hysteria2-02-yuming",
-      "server": "$PUBLIC_IP",
+      "server": "$HY2_DOMAIN_SERVER",
       "server_port": $p_hy2,
       "password": "$pw_hy2",
       "tls": {
         "enabled": true,
-        "insecure": true
+        "insecure": true,
+        "server_name": "$HY2_DOMAIN_SERVER"
       }
     },
     {
@@ -1039,7 +1066,19 @@ EOF
       },
       "transport": {
         "type": "xhttp",
-        "path": "/"
+        "mode": "auto",
+        "host": "$srv_vxr",
+        "path": "/",
+        "x_padding_bytes": "100-1000",
+        "download": {
+          "host": "$srv_vxr",
+          "path": "/",
+          "x_padding_bytes": "100-1000",
+          "tls": {
+            "enabled": true,
+            "server_name": "$srv_vxr"
+          }
+        }
       }
     },
     {
@@ -1057,6 +1096,32 @@ EOF
       }
     },
     {
+      "type": "mieru",
+      "tag": "mieru-01-tcp",
+      "server": "$PUBLIC_IP",
+      "server_port": $p_m1,
+      "transport": "TCP",
+      "username": "$u_m1",
+      "password": "$pw_m1",
+      "multiplexing": "MULTIPLEXING_LOW",
+      "traffic_pattern": "GgQIARAK",
+      "mtu": 1400,
+      "handshake_mode": "HANDSHAKE_STANDARD"
+    },
+    {
+      "type": "mieru",
+      "tag": "mieru-02-udp",
+      "server": "$PUBLIC_IP",
+      "server_port": $p_m2,
+      "transport": "UDP",
+      "username": "$u_m2",
+      "password": "$pw_m2",
+      "multiplexing": "MULTIPLEXING_LOW",
+      "traffic_pattern": "GgQIARAK",
+      "mtu": 1400,
+      "handshake_mode": "HANDSHAKE_STANDARD"
+    },
+    {
       "type": "direct",
       "tag": "direct"
     }
@@ -1065,13 +1130,15 @@ EOF
 EOF
 
     echo "[√] 所有客户端配置已成功保存至 /etc/sing-box/kehu/ 目录！"
-    echo "--------------------------------------------------"
-    echo "📄 订阅文件列表："
+    echo "=================================================="
+    echo "📄 订阅与配置文件列表："
     echo "  1. 链接汇总: /etc/sing-box/kehu/v2ray_links.txt"
     echo "  2. Mihomo:   /etc/sing-box/kehu/mihomo.yaml"
     echo "  3. Sing-box: /etc/sing-box/kehu/client_config.json"
-    echo "--------------------------------------------------"
-    echo "💡 提示：您可以使用 cat /etc/sing-box/kehu/v2ray_links.txt 查看所有节点的链接。"
+    echo "=================================================="
+    echo "💡 节点链接预览（部分）:"
+    cat /etc/sing-box/kehu/v2ray_links.txt | head -n 15
+    echo "......（更多链接请查看 /etc/sing-box/kehu/v2ray_links.txt 文件）"
 }
 
 # ==========================================
