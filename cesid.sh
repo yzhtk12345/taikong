@@ -96,16 +96,23 @@ action_node_wizard() {
     echo "$sname" > /etc/sing-box/value/anytls-02-reality_server
 
     if command -v sing-box &>/dev/null; then
-        kp=$(sing-box generate reality-keypair 2>/dev/null)
-        pri=$(echo "$kp" | grep -i "private" | awk '{print $NF}')
-        [ -z "$pri" ] && pri=$(echo "$kp" | head -n 1 | awk '{print $NF}')
+        kp_output=$(sing-box generate reality-keypair 2>/dev/null)
+        pri=$(echo "$kp_output" | grep -i "PrivateKey" | awk '{print $NF}')
+        pub=$(echo "$kp_output" | grep -i "PublicKey" | awk '{print $NF}')
+        [ -z "$pri" ] && pri=$(echo "$kp_output" | head -n 1 | awk '{print $NF}')
+        [ -z "$pub" ] && pub=$(echo "$kp_output" | tail -n 1 | awk '{print $NF}')
     else
         pri="gKPwgyITTWk1lrlGF19jTZGFrkTDJ4W7vD2jSs2K6Uk"
+        pub="dummy_public_key_anytls"
     fi
     echo "$pri" > /etc/sing-box/value/anytls-02-reality_pri
+    echo "$pub" > /etc/sing-box/value/anytls-02-reality_pub
     sid=$(openssl rand -hex 4 2>/dev/null || echo "d1df3e44")
     echo "$sid" > /etc/sing-box/value/anytls-02-reality_sid
-    echo "[+] anytls-02-reality 独立秘钥已生成: 私钥=$pri, short_id=$sid"
+    echo "[+] anytls-02-reality 独立密钥对已生成:"
+    echo "    -> PrivateKey: $pri"
+    echo "    -> PublicKey : $pub"
+    echo "    -> Short ID  : $sid"
 
     # -------------------------------- 3. hysteria2-01-bing --------------------------------
     echo -e "\n--- [3/9] 配置协议: hysteria2-01-bing ---"
@@ -152,16 +159,23 @@ action_node_wizard() {
     echo "$sname" > /etc/sing-box/value/vless-reality-vision_server
 
     if command -v sing-box &>/dev/null; then
-        kp=$(sing-box generate reality-keypair 2>/dev/null)
-        pri=$(echo "$kp" | grep -i "private" | awk '{print $NF}')
-        [ -z "$pri" ] && pri=$(echo "$kp" | head -n 1 | awk '{print $NF}')
+        kp_output=$(sing-box generate reality-keypair 2>/dev/null)
+        pri=$(echo "$kp_output" | grep -i "PrivateKey" | awk '{print $NF}')
+        pub=$(echo "$kp_output" | grep -i "PublicKey" | awk '{print $NF}')
+        [ -z "$pri" ] && pri=$(echo "$kp_output" | head -n 1 | awk '{print $NF}')
+        [ -z "$pub" ] && pub=$(echo "$kp_output" | tail -n 1 | awk '{print $NF}')
     else
         pri="aEjTOLv8hSboBxvgt5drG-zoQAEkMHBrVwQspV-sZHg"
+        pub="dummy_public_key_vless_vis"
     fi
     echo "$pri" > /etc/sing-box/value/vless-reality-vision_pri
+    echo "$pub" > /etc/sing-box/value/vless-reality-vision_pub
     sid_vvr=$(openssl rand -hex 8 2>/dev/null || echo "27dfe873147095d1")
     echo "$sid_vvr" > /etc/sing-box/value/vless-reality-vision_sid
-    echo "[+] vless-reality-vision 独立秘钥已生成: 私钥=$pri, short_id=$sid_vvr"
+    echo "[+] vless-reality-vision 独立密钥对已生成:"
+    echo "    -> PrivateKey: $pri"
+    echo "    -> PublicKey : $pub"
+    echo "    -> Short ID  : $sid_vvr"
 
     # -------------------------------- 6. vless-xhttp-reality --------------------------------
     echo -e "\n--- [6/9] 配置协议: vless-xhttp-reality ---"
@@ -180,16 +194,23 @@ action_node_wizard() {
     echo "$sname" > /etc/sing-box/value/vless-xhttp-reality_server
 
     if command -v sing-box &>/dev/null; then
-        kp=$(sing-box generate reality-keypair 2>/dev/null)
-        pri_vxr=$(echo "$kp" | grep -i "private" | awk '{print $NF}')
-        [ -z "$pri_vxr" ] && pri_vxr=$(echo "$kp" | head -n 1 | awk '{print $NF}')
+        kp_output=$(sing-box generate reality-keypair 2>/dev/null)
+        pri_vxr=$(echo "$kp_output" | grep -i "PrivateKey" | awk '{print $NF}')
+        pub_vxr=$(echo "$kp_output" | grep -i "PublicKey" | awk '{print $NF}')
+        [ -z "$pri_vxr" ] && pri_vxr=$(echo "$kp_output" | head -n 1 | awk '{print $NF}')
+        [ -z "$pub_vxr" ] && pub_vxr=$(echo "$kp_output" | tail -n 1 | awk '{print $NF}')
     else
         pri_vxr="bEjTOLv8hSboBxvgt5drG-zoQAEkMHBrVwQspV-sZHg"
+        pub_vxr="dummy_public_key_vless_xhttp"
     fi
     echo "$pri_vxr" > /etc/sing-box/value/vless-xhttp-reality_pri
+    echo "$pub_vxr" > /etc/sing-box/value/vless-xhttp-reality_pub
     sid_vxr=$(openssl rand -hex 8 2>/dev/null || echo "27dfe873147095d2")
     echo "$sid_vxr" > /etc/sing-box/value/vless-xhttp-reality_sid
-    echo "[+] vless-xhttp-reality 独立秘钥已生成: 私钥=$pri_vxr, short_id=$sid_vxr"
+    echo "[+] vless-xhttp-reality 独立密钥对已生成:"
+    echo "    -> PrivateKey: $pri_vxr"
+    echo "    -> PublicKey : $pub_vxr"
+    echo "    -> Short ID  : $sid_vxr"
 
     # -------------------------------- 7. tuicv5-01-bing --------------------------------
     echo -e "\n--- [7/9] 配置协议: tuicv5-01-bing ---"
@@ -243,7 +264,7 @@ action_node_wizard() {
     [ -z "$password" ] && password="$pwd_def"
     echo "$password" > /etc/sing-box/value/mieru-02-udp_password
 
-    echo "[√] 所有 9 个协议节点向导配置及独立密钥/参数保存完毕！"
+    echo "[√] 所有 9 个协议节点向导配置及独立密钥对/参数保存完毕！"
 }
 
 # ==========================================
