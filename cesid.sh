@@ -34,14 +34,43 @@ get_random_port() {
 }
 
 # ==========================================
-# 基础生成函数: Hysteria2 自签证书
+# 基础生成函数: Hysteria2 及通用自签证书
 # ==========================================
 action_gen_hy2_cert() {
     mkdir -p /etc/sing-box/ziqian
-    if [ ! -f /etc/sing-box/ziqian/private.key ]; then
-        openssl ecparam -genkey -name prime256v1 -out /etc/sing-box/ziqian/private.key
-        openssl req -new -x509 -days 36500 -key /etc/sing-box/ziqian/private.key -out /etc/sing-box/ziqian/cert.pem -subj "/CN=www.bing.com"
+    if [ ! -f /etc/sing-box/ziqian/private.key ] || [ ! -f /etc/sing-box/ziqian/cert.pem ]; then
+        echo "[+] 正在生成 sing-box 默认自签证书..."
+        openssl ecparam -genkey -name prime256v1 -out /etc/sing-box/ziqian/private.key &>/dev/null
+        openssl req -new -x509 -days 36500 -key /etc/sing-box/ziqian/private.key -out /etc/sing-box/ziqian/cert.pem -subj "/CN=www.bing.com" &>/dev/null
     fi
+}
+
+# ==========================================
+# 证书状态全局检测函数
+# ==========================================
+check_certificates_status() {
+    echo -e "\n===================================="
+    echo "       TLS 证书环境状态检测         "
+    echo "===================================="
+    
+    # 检查自签证书
+    if [ -f /etc/sing-box/ziqian/cert.pem ] && [ -f /etc/sing-box/ziqian/private.key ]; then
+        echo "[√] 自签证书状态: 已就绪 (/etc/sing-box/ziqian/)"
+    else
+        echo "[!] 自签证书不存在，正在自动生成..."
+        action_gen_hy2_cert
+        echo "[√] 自签证书状态: 已生成完成"
+    fi
+
+    # 检查域名证书
+    if [ -f /root/ygkkkca/cert.crt ] && [ -f /root/ygkkkca/private.key ]; then
+        echo "[√] 域名证书状态: 检测到有效证书 (/root/ygkkkca/cert.crt)"
+        HAS_DOMAIN_CERT=1
+    else
+        echo "[x] 域名证书状态: 未在 /root/ygkkkca/ 检测到完整域名证书 (将默认使用自签证书或需手动准备)"
+        HAS_DOMAIN_CERT=0
+    fi
+    echo "===================================="
 }
 
 # ==========================================
@@ -54,7 +83,9 @@ action_node_wizard() {
 
     mkdir -p /etc/sing-box/value
     mkdir -p /etc/sing-box/ziqian
-    action_gen_hy2_cert
+    
+    # 运行证书检测
+    check_certificates_status
 
     # -------------------------------- 1. anytls-01-bing --------------------------------
     echo -e "\n--- [1/9] 配置协议: anytls-01-bing ---"
@@ -68,13 +99,22 @@ action_node_wizard() {
     [ -z "$password" ] && password="$pwd_def"
     echo "$password" > /etc/sing-box/value/anytls-01-bing_password
 
-    echo "检查到自签证书路径: /etc/sing-box/ziqian/cert.pem"
-    echo "检查到域名证书路径: /root/ygkkkca/cert.crt"
-    read -p "请选择证书类型 [1. 自签证书(默认) 2. 域名证书]: " cert_choice < /dev/tty
-    if [ "$cert_choice" = "2" ] && [ -f /root/ygkkkca/cert.crt ]; then
-        echo "/root/ygkkkca/cert.crt" > /etc/sing-box/value/anytls-01-bing_cert
-        echo "/root/ygkkkca/private.key" > /etc/sing-box/value/anytls-01-bing_key
+    echo -e "\n[证书选择提示]"
+    echo "  1) 自签证书路径: /etc/sing-box/ziqian/cert.pem (默认推荐)"
+    if [ "$HAS_DOMAIN_CERT" -eq 1 ]; then
+        echo "  2) 域名证书路径: /root/ygkkkca/cert.crt (检测到已存在)"
+        read -p "请选择证书类型 [1. 自签证书(默认) 2. 域名证书]: " cert_choice < /dev/tty
+        if [ "$cert_choice" = "2" ]; then
+            echo "/root/ygkkkca/cert.crt" > /etc/sing-box/value/anytls-01-bing_cert
+            echo "/root/ygkkkca/private.key" > /etc/sing-box/value/anytls-01-bing_key
+            echo "[√] 已为您绑定: 域名证书"
+        else
+            echo "/etc/sing-box/ziqian/cert.pem" > /etc/sing-box/value/anytls-01-bing_cert
+            echo "/etc/sing-box/ziqian/private.key" > /etc/sing-box/value/anytls-01-bing_key
+            echo "[√] 已为您绑定: 自签证书"
+        fi
     else
+        echo "  [i] 未检测到可用域名证书，自动为您采用自签证书。"
         echo "/etc/sing-box/ziqian/cert.pem" > /etc/sing-box/value/anytls-01-bing_cert
         echo "/etc/sing-box/ziqian/private.key" > /etc/sing-box/value/anytls-01-bing_key
     fi
@@ -115,7 +155,7 @@ action_node_wizard() {
     echo "    -> Short ID  : $sid"
 
     # -------------------------------- 3. hysteria2-01-bing --------------------------------
-    echo -e "\n--- [3/9] 配置协议: hysteria2-01-bing ---"
+    echo -e "\n--- [3/9] 配置协议: hysteria2-01-bing (自签证书) ---"
     p_def=$([ -f /etc/sing-box/value/hysteria2-01-bing_port ] && cat /etc/sing-box/value/hysteria2-01-bing_port || get_random_port)
     read -p "请输入端口 (回车采用 [$p_def]): " port < /dev/tty
     [ -z "$port" ] && port="$p_def"
@@ -127,9 +167,10 @@ action_node_wizard() {
     echo "$password" > /etc/sing-box/value/hysteria2-01-bing_password
     echo "/etc/sing-box/ziqian/cert.pem" > /etc/sing-box/value/hysteria2-01-bing_cert
     echo "/etc/sing-box/ziqian/private.key" > /etc/sing-box/value/hysteria2-01-bing_key
+    echo "[√] 已绑定默认自签证书: /etc/sing-box/ziqian/cert.pem"
 
     # -------------------------------- 4. hysteria2-02-yuming --------------------------------
-    echo -e "\n--- [4/9] 配置协议: hysteria2-02-yuming ---"
+    echo -e "\n--- [4/9] 配置协议: hysteria2-02-yuming (域名证书) ---"
     p_def=$([ -f /etc/sing-box/value/hysteria2-02-yuming_port ] && cat /etc/sing-box/value/hysteria2-02-yuming_port || get_random_port)
     read -p "请输入端口 (回车采用 [$p_def]): " port < /dev/tty
     [ -z "$port" ] && port="$p_def"
@@ -139,8 +180,24 @@ action_node_wizard() {
     read -p "请输入密码 (回车随机生成 [$pwd_def]): " password < /dev/tty
     [ -z "$password" ] && password="$pwd_def"
     echo "$password" > /etc/sing-box/value/hysteria2-02-yuming_password
-    echo "/root/ygkkkca/cert.crt" > /etc/sing-box/value/hysteria2-02-yuming_cert
-    echo "/root/ygkkkca/private.key" > /etc/sing-box/value/hysteria2-02-yuming_key
+
+    if [ "$HAS_DOMAIN_CERT" -eq 1 ]; then
+        echo "[√] 检测到域名证书可用，自动指定为 /root/ygkkkca/cert.crt"
+        echo "/root/ygkkkca/cert.crt" > /etc/sing-box/value/hysteria2-02-yuming_cert
+        echo "/root/ygkkkca/private.key" > /etc/sing-box/value/hysteria2-02-yuming_key
+    else
+        echo "[!] 未检测到标准域名证书，是否输入自定义证书路径？(直接回车默认使用自签证书)"
+        read -p "请输入证书路径 (回车使用自签证书): " custom_cert < /dev/tty
+        if [ -n "$custom_cert" ] && [ -f "$custom_cert" ]; then
+            echo "$custom_cert" > /etc/sing-box/value/hysteria2-02-yuming_cert
+            read -p "请输入私钥路径: " custom_key < /dev/tty
+            echo "${custom_key:-/root/ygkkkca/private.key}" > /etc/sing-box/value/hysteria2-02-yuming_key
+        else
+            echo "/etc/sing-box/ziqian/cert.pem" > /etc/sing-box/value/hysteria2-02-yuming_cert
+            echo "/etc/sing-box/ziqian/private.key" > /etc/sing-box/value/hysteria2-02-yuming_key
+            echo "[i] 已回退使用自签证书路径。"
+        fi
+    fi
 
     # -------------------------------- 5. vless-reality-vision --------------------------------
     echo -e "\n--- [5/9] 配置协议: vless-reality-vision ---"
@@ -362,7 +419,7 @@ action_generate_config_json() {
         [ -f "$file" ] && cat "$file" || echo "$2"
     }
 
-    # 1. 读取各项参数（引入各自独立的 Reality 密钥与 Mieru 用户名）
+    # 1. 读取各项参数
     p_any1=$(read_val "anytls-01-bing_port" "38559")
     pw_any1=$(read_val "anytls-01-bing_password" "dfgdfgerterterdfg234234")
     cert_any1=$(read_val "anytls-01-bing_cert" "/etc/sing-box/cert.pem")
@@ -698,7 +755,7 @@ show_test_menu() {
     echo "=================================================="
     echo "      sing-box 9 节点一键配置与管理工具箱       "
     echo "=================================================="
-    echo " 1. 🚀 运行完整 9 节点交互式配置向导 (独立Reality秘钥/Mieru用户名)"
+    echo " 1. 🚀 运行完整 9 节点交互式配置向导 (含证书检测与独立密钥)"
     echo " 2. 🛡️ 检测/安装防火墙并自动按需放行端口 (带备注)"
     echo " 3. 📝 自动组装并写入 /etc/sing-box/config.json"
     echo " 0. 退出脚本"
