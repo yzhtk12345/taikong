@@ -230,11 +230,11 @@ action_gen_hy2_cert() {
 
     mkdir -p /etc/sing-box/ziqian
     openssl ecparam -genkey -name prime256v1 -out /etc/sing-box/ziqian/private.key
-    openssl req -new -x509 -days 36500 -key /etc/sing-box/ziqian/private.key -out /etc/sing-box/cert.pem -subj "/CN=www.bing.com"
+    openssl req -new -x509 -days 36500 -key /etc/sing-box/ziqian/private.key -out /etc/sing-box/ziqian/cert.pem -subj "/CN=www.bing.com"
 
     echo "[√] Hysteria2 自签证书生成完毕！"
     echo " - 私钥路径 : /etc/sing-box/ziqian/private.key"
-    echo " - 证书路径 : /etc/sing-box/cert.pem"
+    echo " - 证书路径 : /etc/sing-box/ziqian/cert.pem"
 }
 
 # ==========================================
