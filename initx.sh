@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 确保以 root 运行
+# 确保以 root 权限运行
 if [ "$EUID" -ne 0 ]; then
   echo "[-] 错误：请使用 root 权限运行此脚本！"
   exit 1
@@ -21,7 +21,7 @@ CPU_ARCH=$(uname -m | tr -d '\0')
 
 # 检测 x86_64 的微架构级别，并做好通用架构兜底
 CPU_V_LEVEL="不适用 (非 x86_64)"
-SINGBOX_CPU_SUFFIX="amd64"
+SINGBOX_CPU_SUFFIX="amd64" # 默认兜底为通用 amd64
 
 if [ "$CPU_ARCH" = "x86_64" ]; then
     if grep -q "avx512f" /proc/cpuinfo; then
@@ -46,6 +46,7 @@ fi
 
 CURRENT_HOSTNAME=$(hostname)
 
+# 获取当前 Root 远程登录状态
 SSHD_CONFIG="/etc/ssh/sshd_config"
 if grep -qE "^PermitRootLogin\s+no" "$SSHD_CONFIG" 2>/dev/null; then
     ROOT_LOGIN_STATUS="已禁用"
@@ -53,24 +54,55 @@ else
     ROOT_LOGIN_STATUS="未禁用 (或未配置)"
 fi
 
-get_local_singbox_status() {
+# ==========================================
+# 辅助函数: 获取 sing-box 版本与检查状态
+# ==========================================
+get_singbox_version_info() {
+    # 1. 获取本地版本
     if command -v sing-box &>/dev/null; then
-        LOCAL_SB_VERSION=$(sing-box version 2>/dev/null | head -n 1 | awk '{print $3}')
-        [ -z "$LOCAL_SB_VERSION" ] && LOCAL_SB_VERSION="已知晓但版本未知"
-        echo "已安装 ($LOCAL_SB_VERSION)"
+        LOCAL_SB_VER=$(sing-box version 2>/dev/null | head -n 1 | awk '{print $3}')
+        [ -z "$LOCAL_SB_VER" ] && LOCAL_SB_VER="已知晓但版本未知"
     else
-        echo "未安装"
+        LOCAL_SB_VER="未安装"
+    fi
+
+    # 2. 获取远程最新版本 (限制超时时间为 2 秒，避免菜单卡顿)
+    REMOTE_SB_VER=$(curl -sSL --max-time 2 https://api.github.com/repos/shtorm-7/sing-box-extended/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    [ -z "$REMOTE_SB_VER" ] && REMOTE_SB_VER="获取失败"
+
+    # 3. 对比状态判定
+    if [ "$LOCAL_SB_VER" = "未安装" ]; then
+        SB_CHECK_STATUS="[-] 请前往选项 2 安装"
+    elif [ "$REMOTE_SB_VER" = "获取失败" ]; then
+        SB_CHECK_STATUS="[!] 无法连接 GitHub (网络超时)"
+    elif [ "$LOCAL_SB_VER" = "$REMOTE_SB_VER" ]; then
+        SB_CHECK_STATUS="[√] 已是最新版本"
+    else
+        SB_CHECK_STATUS="[!] 发现新版本，可前往更新"
     fi
 }
 
 # ==========================================
-# 功能函数 1: 系统初始化与安全加固
+# 功能函数 1: 系统初始化与安全加固 (含修改主机名)
 # ==========================================
 action_init_security() {
     echo -e "\n===================================="
     echo "  开始执行：系统初始化与安全加固"
     echo "===================================="
 
+    # 0. 修改主机名
+    echo -e "\n--- [步骤 0/4] 修改主机名 ---"
+    read -p "请输入新的主机名 (直接回车保持当前 [$CURRENT_HOSTNAME]): " NEW_HOSTNAME < /dev/tty
+    if [ -n "$NEW_HOSTNAME" ]; then
+        hostnamectl set-hostname "$NEW_HOSTNAME"
+        CURRENT_HOSTNAME="$NEW_HOSTNAME"
+        echo "[+] 主机名已成功修改为: $NEW_HOSTNAME"
+    else
+        echo "[+] 保持当前主机名不变: $CURRENT_HOSTNAME"
+    fi
+
+    # 1. 创建用户
+    echo -e "\n--- [步骤 1/4] 创建系统新用户 ---"
     RANDOM_USER="user_$(tr -dc 'a-z0-9' < /dev/urandom | head -c 4)"
     while true; do
         read -p "请输入要创建的新用户名 (直接回车将随机生成 [$RANDOM_USER]): " NEW_USER < /dev/tty
@@ -90,6 +122,8 @@ action_init_security() {
     passwd "$NEW_USER"
     echo "[+] 用户 '$NEW_USER' 创建成功！"
 
+    # 2. 赋予 sudo 权限
+    echo -e "\n--- [步骤 2/4] 配置 Sudo 权限 ---"
     if grep -q "^sudo:" /etc/group; then
         usermod -aG sudo "$NEW_USER"
         echo "[+] 已将 '$NEW_USER' 添加到 sudo 组"
@@ -101,6 +135,8 @@ action_init_security() {
         echo "[+] 已独立写入 sudoers 规则。"
     fi
 
+    # 3. 修改 SSH 端口
+    echo -e "\n--- [步骤 3/4] 修改 SSH 远程端口 ---"
     RANDOM_PORT=$((RANDOM % 64512 + 1024))
     while true; do
         read -p "请输入新的 SSH 端口 (1024-65535，直接回车随机生成 [$RANDOM_PORT]): " NEW_SSH_PORT < /dev/tty
@@ -128,12 +164,15 @@ action_init_security() {
         echo "Port $NEW_SSH_PORT" >> "$SSHD_CONFIG"
     fi
 
+    # 4. 禁止 Root 登录
+    echo -e "\n--- [步骤 4/4] 禁用 Root 远程登录 ---"
     if grep -qE "^#?PermitRootLogin " "$SSHD_CONFIG"; then
         sed -i "s/^#\?PermitRootLogin .*/PermitRootLogin no/" "$SSHD_CONFIG"
     else
         echo "PermitRootLogin no" >> "$SSHD_CONFIG"
     fi
 
+    # 5. 重启 SSH
     if sshd -t; then
         if systemctl list-units --full -all | grep -q "ssh.service"; then
             systemctl restart ssh
@@ -148,8 +187,9 @@ action_init_security() {
     fi
 
     echo -e "\n===================================="
-    echo "         安全加固执行完毕！         "
+    echo "         安全加固执行完毕！          "
     echo "===================================="
+    echo " - 当前主机名   : $CURRENT_HOSTNAME"
     echo " - 新用户名     : $NEW_USER"
     echo " - 新 SSH 端口  : $NEW_SSH_PORT"
     echo " - Root 远程登录: 已禁用"
@@ -158,7 +198,7 @@ action_init_security() {
 }
 
 # ==========================================
-# 功能函数 2: 管理与安装 sing-box
+# 功能函数 2: 管理与安装 sing-box (带通用架构降级兜底)
 # ==========================================
 action_manage_singbox() {
     echo -e "\n===================================="
@@ -182,6 +222,8 @@ action_manage_singbox() {
             echo "[√] 状态：当前已是最新版本 ($LATEST_TAG)"
         else
             echo "[!] 状态：版本不一致或需要更新。"
+            echo "    -> 当前本地版本: ${LOCAL_VERSION:-未知}"
+            echo "    -> 远程最新版本: $LATEST_TAG"
         fi
 
         read -p "是否需要重新下载并覆盖安装最新版？(y/n): " reinstall < /dev/tty
@@ -193,12 +235,15 @@ action_manage_singbox() {
     fi
 
     echo "[+] 正在匹配您的 CPU 架构首选项 ($SINGBOX_CPU_SUFFIX) 准备下载..."
+    
     DOWNLOAD_URL=$(curl -sSL https://api.github.com/repos/shtorm-7/sing-box-extended/releases/latest | grep "browser_download_url" | grep -E "linux-$SINGBOX_CPU_SUFFIX" | head -n 1 | cut -d '"' -f 4)
 
     if [ -z "$DOWNLOAD_URL" ] && [[ "$SINGBOX_CPU_SUFFIX" =~ ^amd64 ]]; then
+        echo "[!] 未能匹配到专属优化架构包，正在自动降级尝试下载【通用标准 amd64】版本..."
         SINGBOX_CPU_SUFFIX="amd64"
         DOWNLOAD_URL=$(curl -sSL https://api.github.com/repos/shtorm-7/sing-box-extended/releases/latest | grep "browser_download_url" | grep -E "linux-amd64" | head -n 1 | cut -d '"' -f 4)
     elif [ -z "$DOWNLOAD_URL" ] && [[ "$SINGBOX_CPU_SUFFIX" =~ ^arm64 ]]; then
+        echo "[!] 未能匹配到专属优化架构包，正在自动降级尝试下载【通用标准 arm64】版本..."
         SINGBOX_CPU_SUFFIX="arm64"
         DOWNLOAD_URL=$(curl -sSL https://api.github.com/repos/shtorm-7/sing-box-extended/releases/latest | grep "browser_download_url" | grep -E "linux-arm64" | head -n 1 | cut -d '"' -f 4)
     fi
@@ -208,8 +253,12 @@ action_manage_singbox() {
         return
     fi
 
+    echo "[+] 最终确定的下载地址: $DOWNLOAD_URL"
     TEMP_FILE="/tmp/sing-box-extended.tar.gz"
+    
+    echo "[+] 正在下载安装包..."
     if curl -sSL "$DOWNLOAD_URL" -o "$TEMP_FILE"; then
+        echo "[+] 下载完成，正在解压并安装..."
         mkdir -p /tmp/sing-box-extract
         tar -xzf "$TEMP_FILE" -C /tmp/sing-box-extract --strip-components=1 2>/dev/null || tar -xzf "$TEMP_FILE" -C /tmp/sing-box-extract
         
@@ -217,12 +266,21 @@ action_manage_singbox() {
         if [ -n "$SB_BINARY" ]; then
             cp -f "$SB_BINARY" /usr/local/bin/sing-box
             chmod +x /usr/local/bin/sing-box
+            
+            # 创建默认配置目录
             mkdir -p /etc/sing-box
+            
             echo "[√] sing-box 安装/更新成功！"
+            echo "--------------------------------------------------"
+            echo " 【安装路径与配置指南】"
+            echo " - 程序二进制文件路径 : /usr/local/bin/sing-box"
+            echo " - 默认配置文件目录   : /etc/sing-box/ (可在此放置 config.json)"
+            echo "--------------------------------------------------"
             sing-box version
         else
-            echo "[-] 错误：在解压后的文件中没有找到 sing-box 二进制程序。"
+            echo "[-] 错误：在解压后的文件中没有找到 sing-box 二进制程序."
         fi
+        
         rm -rf "$TEMP_FILE" /tmp/sing-box-extract
     else
         echo "[-] 错误：下载文件失败！"
@@ -230,260 +288,38 @@ action_manage_singbox() {
 }
 
 # ==========================================
-# 功能函数 3: 全协议向导配置生成器 (旗舰版)
+# 功能函数 3: 查看 sing-box 运行状态与日志
 # ==========================================
-action_generate_config() {
+action_view_singbox_status_logs() {
     echo -e "\n===================================="
-    echo "   sing-box 旗舰全协议配置文件向导   "
-    echo "===================================="
-    echo "说明: 依次输入各项配置，直接按回车将自动生成随机值。"
-    echo "------------------------------------"
-
-    DEF_UUID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || tr -dc 'a-f0-9' < /dev/urandom | head -c 32)
-    DEF_PASSWORD=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
-    
-    read -p "请输入主通用 UUID (直接回车随机生成): " IN_UUID < /dev/tty
-    [ -z "$IN_UUID" ] && IN_UUID="$DEF_UUID"
-
-    read -p "请输入通用访问密码/AnyTLS密码 (直接回车随机生成): " IN_PWD < /dev/tty
-    [ -z "$IN_PWD" ] && IN_PWD="$DEF_PASSWORD"
-
-    read -p "请输入 VLESS-REALITY 伪装域名 (默认: dl.google.com): " IN_REALITY_SNI < /dev/tty
-    [ -z "$IN_REALITY_SNI" ] && IN_REALITY_SNI="dl.google.com"
-
-    read -p "请输入 XHTTP 伪装路径 (默认: /xhttp): " IN_XHTTP_PATH < /dev/tty
-    [ -z "$IN_XHTTP_PATH" ] && IN_XHTTP_PATH="/xhttp"
-
-    read -p "请输入 VLESS/XHTTP 绑定的域名 (若有证书，选填): " IN_DOMAIN < /dev/tty
-    [ -z "$IN_DOMAIN" ] && IN_DOMAIN="yourdomain.com"
-
-    echo "[+] 正在为 REALITY 协议生成临时公私钥..."
-    REALITY_KEYS=$(sing-box generate reality-keypair 2>/dev/null)
-    if [ -n "$REALITY_KEYS" ]; then
-        R_PRIV=$(echo "$REALITY_KEYS" | grep "PrivateKey" | awk '{print $2}' | tr -d '"')
-        R_PUB=$(echo "$REALITY_KEYS" | grep "PublicKey" | awk '{print $2}' | tr -d '"')
-    else
-        R_PRIV="E_xample_Priv_Key_Replace_Me_1234567890"
-        R_PUB="E_xample_Pub_Key_Replace_Me_1234567890"
-    fi
-
-    echo "[+] 生成参数摘要："
-    echo " - UUID        : $IN_UUID"
-    echo " - 密码        : $IN_PWD"
-    echo " - REALITY SNI : $IN_REALITY_SNI"
-    echo " - XHTTP 路径  : $IN_XHTTP_PATH"
-    echo "------------------------------------"
-    read -p "确认写入配置文件并注册服务？(y/n): " confirm < /dev/tty
-    [ "$confirm" != "y" ] && return
-
-    CONFIG_PATH="/etc/sing-box/config.json"
-    mkdir -p /etc/sing-box
-
-    cat << EOF > "$CONFIG_PATH"
-{
-  "log": {
-    "disabled": false,
-    "level": "info",
-    "timestamp": true
-  },
-  "dns": {
-    "servers": [
-      {
-        "tag": "local-dns",
-        "address": "local"
-      }
-    ],
-    "strategy": "prefer_ipv4"
-  },
-  "inbounds": [
-    {
-      "type": "vless",
-      "tag": "vless-reality-in",
-      "listen": "::",
-      "listen_port": 443,
-      "users": [
-        {
-          "uuid": "$IN_UUID",
-          "flow": "xtls-rprx-vision"
-        }
-      ],
-      "tls": {
-        "enabled": true,
-        "server_name": "$IN_REALITY_SNI",
-        "reality": {
-          "enabled": true,
-          "pubkey": "$R_PUB",
-          "privkey": "$R_PRIV"
-        }
-      }
-    },
-    {
-      "type": "vless",
-      "tag": "vless-xhttp-in",
-      "listen": "::",
-      "listen_port": 8443,
-      "users": [
-        {
-          "uuid": "$IN_UUID",
-          "flow": ""
-        }
-      ],
-      "tls": {
-        "enabled": true,
-        "server_name": "$IN_DOMAIN",
-        "certificate_path": "/etc/sing-box/cert.pem",
-        "key_path": "/etc/sing-box/private.key"
-      },
-      "transport": {
-        "type": "xhttp",
-        "path": "$IN_XHTTP_PATH",
-        "mode": "auto"
-      }
-    },
-    {
-      "type": "anytls",
-      "tag": "anytls-in",
-      "listen": "::",
-      "listen_port": 9443,
-      "users": [
-        {
-          "password": "$IN_PWD"
-        }
-      ],
-      "tls": {
-        "enabled": true,
-        "server_name": "$IN_DOMAIN",
-        "certificate_path": "/etc/sing-box/cert.pem",
-        "key_path": "/etc/sing-box/private.key"
-      }
-    },
-    {
-      "type": "hysteria2",
-      "tag": "hy2-in",
-      "listen": "::",
-      "listen_port": 8444,
-      "users": [
-        {
-          "password": "$IN_PWD"
-        }
-      ],
-      "tls": {
-        "enabled": true,
-        "server_name": "$IN_DOMAIN",
-        "certificate_path": "/etc/sing-box/cert.pem",
-        "key_path": "/etc/sing-box/private.key"
-      }
-    },
-    {
-      "type": "tuic",
-      "tag": "tuic-in",
-      "listen": "::",
-      "listen_port": 8445,
-      "users": [
-        {
-          "uuid": "$IN_UUID",
-          "password": "$IN_PWD"
-        }
-      ],
-      "tls": {
-        "enabled": true,
-        "server_name": "$IN_DOMAIN",
-        "certificate_path": "/etc/sing-box/cert.pem",
-        "key_path": "/etc/sing-box/private.key"
-      },
-      "congestion_control": "bbr"
-    }
-  ],
-  "outbounds": [
-    {
-      "type": "direct",
-      "tag": "direct"
-    },
-    {
-      "type": "block",
-      "tag": "block"
-    }
-  ],
-  "route": {
-    "rules": [
-      {
-        "protocol": "dns",
-        "action": "hijack-dns"
-      }
-    ],
-    "final": "direct",
-    "auto_detect_interface": true
-  }
-}
-EOF
-
-    echo "[+] 配置文件已成功写入: $CONFIG_PATH"
-
-    SERVICE_FILE="/etc/systemd/system/sing-box.service"
-    cat << EOF > "$SERVICE_FILE"
-[Unit]
-Description=sing-box service (Extended Multi-Protocol)
-Documentation=https://github.com/shtorm-7/sing-box-extended
-After=network.target nss-lookup.target
-
-[Service]
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
-ExecStart=/usr/local/bin/sing-box run -C /etc/sing-box
-Restart=on-failure
-RestartSec=10
-LimitNOFILE=infinity
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    systemctl daemon-reload
-    systemctl enable --now sing-box
-    echo "[√] sing-box 系统服务已成功注册并启动！"
-}
-
-# ==========================================
-# 功能函数 4: 查看 sing-box 运行状态
-# ==========================================
-action_check_singbox_status() {
-    echo -e "\n===================================="
-    echo "       sing-box 运行状态与信息        "
+    echo "      查看 sing-box 运行状态与日志"
     echo "===================================="
 
     if ! command -v sing-box &>/dev/null; then
-        echo "[-] 提示：系统尚未安装 sing-box，请先通过菜单项 2 进行安装。"
+        echo "[-] 提示：系统未安装 sing-box 程序。"
         return
     fi
 
-    LOCAL_VERSION=$(sing-box version 2>/dev/null | head -n 1 | awk '{print $3}')
-    echo "[+] 本地版本 : ${LOCAL_VERSION:-未知}"
-    echo "[+] 二进制路径: /usr/local/bin/sing-box"
-    echo "[+] 配置文件目录: /etc/sing-box/"
-    echo "------------------------------------"
-
-    if systemctl list-unit-files | grep -q "sing-box.service"; then
-        echo "[+] Systemd 服务: 已注册"
-        SERVICE_STATUS=$(systemctl is-active sing-box)
-        if [ "$SERVICE_STATUS" = "active" ]; then
-            echo "[√] 运行状态   : 正在运行 (active/running)"
-            PID=$(systemctl show -p MainPID --value sing-box)
-            if [ "$PID" -gt 0 ] 2>/dev/null; then
-                CPU_MEM=$(ps -p "$PID" -o %cpu,%mem,etime --no-headers 2>/dev/null)
-                echo "[+] 进程 PID   : $PID"
-                echo "[+] 资源占用   : CPU / 内存 / 运行时间"
-                echo "               $CPU_MEM"
-            fi
-        else
-            echo "[!] 运行状态   : 未运行 (状态: $SERVICE_STATUS)"
-        fi
+    # 检查是否存在 systemd 服务
+    if systemctl list-unit-files | grep -q "sing-box.service" || [ -f /etc/systemd/system/sing-box.service ] || [ -f /lib/systemd/system/sing-box.service ]; then
+        echo "[+] 检测到 sing-box 系统服务 (systemd)："
         echo "------------------------------------"
-        echo "[+] 最近服务日志 (journalctl):"
-        journalctl -u sing-box -n 5 --no-pager 2>/dev/null || echo "暂无日志或无法读取"
+        systemctl status sing-box --no-pager
+        echo "------------------------------------"
+        echo "[+] 最近 50 行运行日志："
+        echo "------------------------------------"
+        journalctl -u sing-box -n 50 --no-pager
     else
-        echo "[!] Systemd 服务: 未注册为系统服务"
+        echo "[!] 提示：未检测到标准的 systemd 服务（sing-box.service）。"
+        echo "[+] 正在检查当前系统中的 sing-box 进程运行状态："
+        echo "------------------------------------"
+        if pgrep -x "sing-box" > /dev/null; then
+            echo "[√] sing-box 进程正在运行中："
+            ps aux | grep "[s]ing-box"
+        else
+            echo "[-] 当前没有检测到运行中的 sing-box 进程。"
+        fi
     fi
-    echo "===================================="
 }
 
 # ==========================================
@@ -491,7 +327,7 @@ action_check_singbox_status() {
 # ==========================================
 show_menu() {
     clear
-    SB_MENU_STATUS=$(get_local_singbox_status)
+    get_singbox_version_info
 
     echo "=================================================="
     echo "      Linux VPS 自动化运维与管理工具箱          "
@@ -502,20 +338,23 @@ show_menu() {
     echo " - CPU 指令级别 : $CPU_V_LEVEL"
     echo " - 当前主机名   : $CURRENT_HOSTNAME"
     echo " - Root 远程登录: $ROOT_LOGIN_STATUS"
-    echo " - sing-box状态 : $SB_MENU_STATUS"
+    echo "--------------------------------------------------"
+    echo " [sing-box 版本与状态检查]"
+    echo " - 本地安装版本 : $LOCAL_SB_VER"
+    echo " - 远程最新版本 : $REMOTE_SB_VER"
+    echo " - 版本检查状态 : $SB_CHECK_STATUS"
     if command -v sing-box &>/dev/null; then
-        echo "   -> 程序安装路径 : /usr/local/bin/sing-box"
-        echo "   -> 配置文件目录 : /etc/sing-box/"
+        echo "    -> 程序安装路径 : /usr/local/bin/sing-box"
+        echo "    -> 配置文件目录 : /etc/sing-box/"
     fi
     echo "=================================================="
     echo " 请选择要执行的功能操作："
-    echo "   1. 执行系统初始化与安全加固 (建用户/改端口/禁Root)"
-    echo "   2. 检查/安装/更新 sing-box (shtorm-7 扩展版)"
-    echo "   3. 生成/写入 sing-box 全协议配置文件 (向导模式)"
-    echo "   4. 查看 sing-box 运行状态与详情信息"
-    echo "   0. 退出脚本"
+    echo "    1. 执行系统初始化与安全加固 (改主机名/建用户/改端口/禁Root)"
+    echo "    2. 检查/安装/更新 sing-box (shtorm-7 扩展版)"
+    echo "    3. 查看 sing-box 运行状态与日志"
+    echo "    0. 退出脚本"
     echo "=================================================="
-    read -p "请输入选项数字 [0-4]: " choice < /dev/tty
+    read -p "请输入选项数字 [0-3]: " choice < /dev/tty
 
     case "$choice" in
         1)
@@ -529,12 +368,7 @@ show_menu() {
             read -p "按回车键返回主菜单..." < /dev/tty
             ;;
         3)
-            action_generate_config
-            echo ""
-            read -p "按回车键返回主菜单..." < /dev/tty
-            ;;
-        4)
-            action_check_singbox_status
+            action_view_singbox_status_logs
             echo ""
             read -p "按回车键返回主菜单..." < /dev/tty
             ;;
