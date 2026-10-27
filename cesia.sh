@@ -51,7 +51,7 @@ action_input_ports() {
 }
 
 # ==========================================
-# 功能函数 B (第2个): 检测/安装防火墙并放行端口
+# 功能函数 B (第2个): 检测/安装防火墙并放行端口 (含 UFW 备注)
 # ==========================================
 action_setup_firewall() {
     echo -e "\n===================================="
@@ -113,31 +113,50 @@ action_setup_firewall() {
     [ -z "$SSH_PORT" ] && SSH_PORT=22
     echo "[+] 当前检测到 SSH 端口为: $SSH_PORT"
 
-    # 4. 获取 /etc/sing-box/value/ 下保存的所有端口
-    PORTS=()
+    # 4. 定义 9 个节点列表并校验是否存在对应的端口文件
+    nodes=(
+        "hysteria2-01-bing"
+        "hysteria2-02-yuming"
+        "anytls-01-bing"
+        "anytls-02-reality"
+        "vless-reality-vision"
+        "vless-xhttp-reality"
+        "tuicv5-01-bing"
+        "mieru-01-tcp"
+        "mieru-02-udp"
+    )
+
+    VALID_COUNT=0
     if [ -d /etc/sing-box/value ]; then
-        for f in /etc/sing-box/value/*; do
+        for node in "${nodes[@]}"; do
+            f="/etc/sing-box/value/$node"
             if [ -f "$f" ]; then
                 p=$(cat "$f")
-                [[ "$p" =~ ^[0-9]+$ ]] && PORTS+=("$p")
+                [[ "$p" =~ ^[0-9]+$ ]] && VALID_COUNT=$((VALID_COUNT + 1))
             fi
         done
     fi
 
-    if [ ${#PORTS[@]} -eq 0 ]; then
+    if [ "$VALID_COUNT" -eq 0 ]; then
         echo "[-] 警告：未在 /etc/sing-box/value/ 目录下找到任何有效的端口配置，请先运行选项 1！"
         return
     fi
 
-    # 5. 配置防火墙规则并放行
+    # 5. 配置防火墙规则并放行（支持 UFW 备注）
     if [ "$ACTIVE_FW" = "ufw" ]; then
         echo "[+] 正在配置 UFW 防火墙规则..."
         ufw --force enable &>/dev/null
-        ufw allow "$SSH_PORT"/tcp &>/dev/null
-        for p in "${PORTS[@]}"; do
-            ufw allow "$p"/tcp &>/dev/null
-            ufw allow "$p"/udp &>/dev/null
-            echo "[+] UFW 已放行端口: $p (TCP/UDP)"
+        ufw allow "$SSH_PORT"/tcp comment "ssh端口" &>/dev/null
+        for node in "${nodes[@]}"; do
+            f="/etc/sing-box/value/$node"
+            if [ -f "$f" ]; then
+                p=$(cat "$f")
+                if [[ "$p" =~ ^[0-9]+$ ]]; then
+                    ufw allow "$p"/tcp comment "$node" &>/dev/null
+                    ufw allow "$p"/udp comment "$node" &>/dev/null
+                    echo "[+] UFW 已放行端口: $p (TCP/UDP) [备注: $node]"
+                fi
+            fi
         done
         ufw reload &>/dev/null
         echo "[√] UFW 防火墙规则配置完毕！"
@@ -146,10 +165,16 @@ action_setup_firewall() {
         systemctl start firewalld &>/dev/null
         systemctl enable firewalld &>/dev/null
         firewall-cmd --permanent --add-port="$SSH_PORT"/tcp &>/dev/null
-        for p in "${PORTS[@]}"; do
-            firewall-cmd --permanent --add-port="$p"/tcp &>/dev/null
-            firewall-cmd --permanent --add-port="$p"/udp &>/dev/null
-            echo "[+] Firewalld 已放行端口: $p (TCP/UDP)"
+        for node in "${nodes[@]}"; do
+            f="/etc/sing-box/value/$node"
+            if [ -f "$f" ]; then
+                p=$(cat "$f")
+                if [[ "$p" =~ ^[0-9]+$ ]]; then
+                    firewall-cmd --permanent --add-port="$p"/tcp &>/dev/null
+                    firewall-cmd --permanent --add-port="$p"/udp &>/dev/null
+                    echo "[+] Firewalld 已放行端口: $p (TCP/UDP)"
+                fi
+            fi
         done
         firewall-cmd --reload &>/dev/null
         echo "[√] Firewalld 防火墙规则配置完毕！"
@@ -165,7 +190,7 @@ show_test_menu() {
     echo "         端口配置与防火墙功能测试菜单            "
     echo "=================================================="
     echo " 1. 运行函数 1：输入或随机生成 9 个节点端口"
-    echo " 2. 运行函数 2：检测/安装防火墙并自动放行端口"
+    echo " 2. 运行函数 2：检测/安装防火墙并自动放行端口(带备注)"
     echo " 0. 退出脚本"
     echo "=================================================="
     read -p "请输入选项数字 [0-2]: " choice < /dev/tty
