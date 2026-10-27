@@ -67,15 +67,26 @@ get_singbox_version_info() {
     fi
 
     # 2. 获取远程最新版本 (限制超时时间为 2 秒，避免菜单卡顿)
-    REMOTE_SB_VER=$(curl -sSL --max-time 2 https://api.github.com/repos/shtorm-7/sing-box-extended/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    [ -z "$REMOTE_SB_VER" ] && REMOTE_SB_VER="获取失败"
+    REMOTE_TAG=$(curl -sSL --max-time 2 https://api.github.com/repos/shtorm-7/sing-box-extended/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    [ -z "$REMOTE_TAG" ] && REMOTE_TAG="获取失败"
 
-    # 3. 对比状态判定
+    if [ "$REMOTE_TAG" = "获取失败" ]; then
+        REMOTE_SB_VER="获取失败"
+        CLEAN_REMOTE=""
+    else
+        REMOTE_SB_VER="$REMOTE_TAG"
+        # 剥离前缀 v 或 V 用于精准比对
+        CLEAN_REMOTE="${REMOTE_TAG#[vV]}"
+    fi
+
+    CLEAN_LOCAL="${LOCAL_SB_VER#[vV]}"
+
+    # 3. 对比状态判定 (基于剥离 v 后的纯净版本号比对)
     if [ "$LOCAL_SB_VER" = "未安装" ]; then
         SB_CHECK_STATUS="[-] 请前往选项 2 安装"
     elif [ "$REMOTE_SB_VER" = "获取失败" ]; then
         SB_CHECK_STATUS="[!] 无法连接 GitHub (网络超时)"
-    elif [ "$LOCAL_SB_VER" = "$REMOTE_SB_VER" ]; then
+    elif [ "$CLEAN_LOCAL" = "$CLEAN_REMOTE" ]; then
         SB_CHECK_STATUS="[√] 已是最新版本"
     else
         SB_CHECK_STATUS="[!] 发现新版本，可前往更新"
@@ -218,7 +229,10 @@ action_manage_singbox() {
         LOCAL_VERSION=$(sing-box version 2>/dev/null | head -n 1 | awk '{print $3}')
         echo "[+] 本地系统已安装版本 : ${LOCAL_VERSION:-未知}"
         
-        if [ "$LATEST_TAG" != "未知" ] && [ "$LOCAL_VERSION" = "$LATEST_TAG" ]; then
+        CLEAN_LOCAL_V="${LOCAL_VERSION#[vV]}"
+        CLEAN_LATEST_V="${LATEST_TAG#[vV]}"
+
+        if [ "$LATEST_TAG" != "未知" ] && [ "$CLEAN_LOCAL_V" = "$CLEAN_LATEST_V" ]; then
             echo "[√] 状态：当前已是最新版本 ($LATEST_TAG)"
         else
             echo "[!] 状态：版本不一致或需要更新。"
