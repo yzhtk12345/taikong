@@ -76,7 +76,7 @@ action_input_ports() {
 }
 
 # ==========================================
-# 功能函数 B (第2个): 检测/安装防火墙并放行端口 (含 UFW 备注)
+# 功能函数 B (第2个): 检测/安装防火墙并按需放行 TCP/UDP
 # ==========================================
 action_setup_firewall() {
     echo -e "\n===================================="
@@ -167,7 +167,7 @@ action_setup_firewall() {
         return
     fi
 
-    # 5. 配置防火墙规则并放行（支持 UFW 备注）
+    # 5. 配置防火墙规则并按需放行协议（区分 TCP / UDP）
     if [ "$ACTIVE_FW" = "ufw" ]; then
         echo "[+] 正在配置 UFW 防火墙规则..."
         ufw --force enable &>/dev/null
@@ -177,9 +177,16 @@ action_setup_firewall() {
             if [ -f "$f" ]; then
                 p=$(cat "$f")
                 if [[ "$p" =~ ^[0-9]+$ ]]; then
-                    ufw allow "$p"/tcp comment "$node" &>/dev/null
-                    ufw allow "$p"/udp comment "$node" &>/dev/null
-                    echo "[+] UFW 已放行端口: $p (TCP/UDP) [备注: $node]"
+                    case "$node" in
+                        "hysteria2-01-bing"|"hysteria2-02-yuming"|"tuicv5-01-bing"|"mieru-02-udp")
+                            ufw allow "$p"/udp comment "$node" &>/dev/null
+                            echo "[+] UFW 已放行端口: $p (UDP) [备注: $node]"
+                            ;;
+                        *)
+                            ufw allow "$p"/tcp comment "$node" &>/dev/null
+                            echo "[+] UFW 已放行端口: $p (TCP) [备注: $node]"
+                            ;;
+                    esac
                 fi
             fi
         done
@@ -195,9 +202,16 @@ action_setup_firewall() {
             if [ -f "$f" ]; then
                 p=$(cat "$f")
                 if [[ "$p" =~ ^[0-9]+$ ]]; then
-                    firewall-cmd --permanent --add-port="$p"/tcp &>/dev/null
-                    firewall-cmd --permanent --add-port="$p"/udp &>/dev/null
-                    echo "[+] Firewalld 已放行端口: $p (TCP/UDP)"
+                    case "$node" in
+                        "hysteria2-01-bing"|"hysteria2-02-yuming"|"tuicv5-01-bing"|"mieru-02-udp")
+                            firewall-cmd --permanent --add-port="$p"/udp &>/dev/null
+                            echo "[+] Firewalld 已放行端口: $p (UDP)"
+                            ;;
+                        *)
+                            firewall-cmd --permanent --add-port="$p"/tcp &>/dev/null
+                            echo "[+] Firewalld 已放行端口: $p (TCP)"
+                            ;;
+                    esac
                 fi
             fi
         done
@@ -215,7 +229,7 @@ show_test_menu() {
     echo "         端口配置与防火墙功能测试菜单            "
     echo "=================================================="
     echo " 1. 运行函数 1：输入或随机生成 9 个节点端口(带防占用检测)"
-    echo " 2. 运行函数 2：检测/安装防火墙并自动放行端口(带备注)"
+    echo " 2. 运行函数 2：检测/安装防火墙并按需放行 TCP/UDP(带备注)"
     echo " 0. 退出脚本"
     echo "=================================================="
     read -p "请输入选项数字 [0-2]: " choice < /dev/tty
