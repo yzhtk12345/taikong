@@ -736,7 +736,7 @@ action_setup_firewall() {
 }
 
 # ==========================================
-# 功能函数 6: 生成 /etc/sing-box/config.json
+# 功能函数 7: 生成 /etc/sing-box/config.json
 # ==========================================
 action_generate_config_json() {
     echo -e "\n===================================="
@@ -1075,7 +1075,433 @@ EOF
 
     echo "[√] 配置文件已成功写入 /etc/sing-box/config.json！"
 }
+# ==========================================
+# 功能函数 8: 创建系统服务并启动 sing-box
+# ==========================================
+action_start_singbox() {
+    echo -e "\n===================================="
+    echo "  正在创建 systemd 服务并启动 sing-box"
+    echo "===================================="
 
+    local SB_BIN=""
+    if command -v sing-box &>/dev/null; then
+        SB_BIN=$(command -v sing-box)
+    elif [ -f /usr/local/bin/sing-box ]; then
+        SB_BIN="/usr/local/bin/sing-box"
+    elif [ -f /usr/bin/sing-box ]; then
+        SB_BIN="/usr/bin/sing-box"
+    else
+        echo "[-] 错误：未检测到 sing-box 程序，请确认核心是否已安装！"
+        return 1
+    fi
+
+    cat << EOF > /etc/systemd/system/sing-box.service
+[Unit]
+Description=sing-box service
+Documentation=https://sing-box.sagernet.org
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+WorkingDirectory=/etc/sing-box
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+ExecStart=$SB_BIN run -c /etc/sing-box/config.json
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=infinity
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable sing-box
+    systemctl restart sing-box
+
+    sleep 1
+    if systemctl is-active --quiet sing-box; then
+        echo "[√] sing-box 服务已成功启动并设置为开机自启！"
+        systemctl status sing-box --no-pager
+    else
+        echo "[-] 错误：sing-box 启动失败，请检查以下运行日志："
+        journalctl -u sing-box -n 25 --no-pager
+    fi
+}
+
+# ==========================================
+# 功能函数 8: 生成客户端配置与订阅地址
+# ==========================================
+action_generate_client_configs() {
+    echo -e "\n===================================="
+    echo "  正在生成客户端配置与 9 节点订阅合计"
+    echo "===================================="
+
+    mkdir -p /etc/sing-box/kehu
+
+    # 获取公网 IP（默认项）
+    PUBLIC_IP=$(curl -s ifconfig.me || curl -s api.ipify.org || hostname -I | awk '{print $1}')
+    [ -z "$PUBLIC_IP" ] && PUBLIC_IP="YOUR_SERVER_IP"
+
+    # 智能检查是否有域名证书（若有则提取 CN 域名作为域名节点的连接地址）
+    HY2_DOMAIN_SERVER="$PUBLIC_IP"
+    if [ -f /root/ygkkkca/cert.crt ]; then
+        local extracted_domain=$(openssl x509 -noout -subject -in /root/ygkkkca/cert.crt 2>/dev/null | sed -n 's/.*CN[[:space:]]*=[[:space:]]*\([^,]*\).*/\1/p')
+        [ -n "$extracted_domain" ] && HY2_DOMAIN_SERVER="$extracted_domain"
+    fi
+
+    read_val() {
+        local file="/etc/sing-box/value/$1"
+        [ -f "$file" ] && cat "$file" || echo "$2"
+    }
+
+    # 读取各项配置值
+    p_any1=$(read_val "anytls-01-bing_port" "38559")
+    pw_any1=$(read_val "anytls-01-bing_password" "dfgdfgerterterdfg234234")
+
+    p_any2=$(read_val "anytls-02-reality_port" "49115")
+    pw_any2=$(read_val "anytls-02-reality_password" "sdfsfsf2345dsf32r4rwer")
+    srv_any2=$(read_val "anytls-02-reality_server" "gateway.icloud.com")
+    pub_any2=$(read_val "anytls-02-reality_pub" "dummy_pub")
+    sid_any2=$(read_val "anytls-02-reality_sid" "d1df3e44")
+
+    p_hy1=$(read_val "hysteria2-01-bing_port" "45688")
+    pw_hy1=$(read_val "hysteria2-01-bing_password" "hgjghj56456ght45ty45y45y")
+
+    p_hy2=$(read_val "hysteria2-02-yuming_port" "49115")
+    pw_hy2=$(read_val "hysteria2-02-yuming_password" "asdweqwerwerdfgd23423")
+
+    p_vvr=$(read_val "vless-reality-vision_port" "28911")
+    uuid_vvr=$(read_val "vless-reality-vision_uuid" "09c28c16-a8be-44e4-af7c-2e71cca5558e")
+    srv_vvr=$(read_val "vless-reality-vision_server" "dl.delivery.mp.microsoft.com")
+    pub_vvr=$(read_val "vless-reality-vision_pub" "dummy_pub")
+    sid_vvr=$(read_val "vless-reality-vision_sid" "27dfe873147095d1")
+
+    p_vxr=$(read_val "vless-xhttp-reality_port" "56433")
+    uuid_vxr=$(read_val "vless-xhttp-reality_uuid" "3179dce2-2ff9-413c-85b4-c1d53ed41668")
+    srv_vxr=$(read_val "vless-xhttp-reality_server" "intl.cloud.tencent.com")
+    pub_vxr=$(read_val "vless-xhttp-reality_pub" "dummy_pub")
+    sid_vxr=$(read_val "vless-xhttp-reality_sid" "27dfe873147095d2")
+
+    p_tuic=$(read_val "tuicv5-01-bing_port" "35688")
+    uuid_tuic=$(read_val "tuicv5-01-bing_uuid" "09c28c16-a8be-44e4-af7c-2e71cca5558e")
+    pw_tuic=$(read_val "tuicv5-01-bing_password" "3r34r34r34r34reffsfs")
+
+    p_m1=$(read_val "mieru-01-tcp_port" "32498")
+    u_m1=$(read_val "mieru-01-tcp_username" "y64rtyty")
+    pw_m1=$(read_val "mieru-01-tcp_password" "asdade32rew23r2234r24")
+
+    p_m2=$(read_val "mieru-02-udp_port" "46587")
+    u_m2=$(read_val "mieru-02-udp_username" "3r33r3fs")
+    pw_m2=$(read_val "mieru-02-udp_password" "a32e4r34rttfg5t5t53t3")
+
+    # 1. 生成 V2Ray/通用客户端的 9 协议订阅合计链接文件 (/etc/sing-box/kehu/v2ray_links.txt)
+    cat << EOF > /etc/sing-box/kehu/v2ray_links.txt
+==================================================
+ sing-box 9 节点客户端分享与订阅合计
+ 服务器IP: $PUBLIC_IP (域名节点: $HY2_DOMAIN_SERVER)
+==================================================
+
+1. anytls-01-bing (Port: $p_any1)
+anytls://$pw_any1@$PUBLIC_IP:$p_any1?security=tls&sni=www.bing.com&allowInsecure=1#anytls-01-bing
+
+2. anytls-02-reality (Port: $p_any2)
+anytls://$pw_any2@$PUBLIC_IP:$p_any2?security=tls&sni=$srv_any2&pbk=$pub_any2&sid=$sid_any2#anytls-02-reality
+
+3. hysteria2-01-bing (Port: $p_hy1)
+hysteria2://$pw_hy1@$PUBLIC_IP:$p_hy1?insecure=1&sni=www.bing.com#hysteria2-01-bing
+
+4. hysteria2-02-yuming (Port: $p_hy2)
+hysteria2://$pw_hy2@$HY2_DOMAIN_SERVER:$p_hy2?insecure=1&sni=$HY2_DOMAIN_SERVER#hysteria2-02-yuming
+
+5. vless-reality-vision (Port: $p_vvr)
+vless://$uuid_vvr@$PUBLIC_IP:$p_vvr?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$srv_vvr&pbk=$pub_vvr&sid=$sid_vvr&type=tcp#vless-reality-vision
+
+6. vless-xhttp-reality (Port: $p_vxr)
+vless://$uuid_vxr@$PUBLIC_IP:$p_vxr?encryption=none&security=reality&sni=$srv_vxr&pbk=$pub_vxr&sid=$sid_vxr&type=xhttp&path=/#vless-xhttp-reality
+
+7. tuicv5-01-bing (Port: $p_tuic)
+tuic://$uuid_tuic:$pw_tuic@$PUBLIC_IP:$p_tuic?congestion_control=cubic&sni=www.bing.com&allow_insecure=1#tuicv5-01-bing
+
+8. mieru-01-tcp (Port: $p_m1)
+mieru://$u_m1:$pw_m1@$PUBLIC_IP:$p_m1?transport=TCP#mieru-01-tcp
+
+9. mieru-02-udp (Port: $p_m2)
+mieru://$u_m2:$pw_m2@$PUBLIC_IP:$p_m2?transport=UDP#mieru-02-udp
+==================================================
+EOF
+
+    # 2. 生成 Mihomo 客户端配置 (/etc/sing-box/kehu/mihomo.yaml)
+    cat << EOF > /etc/sing-box/kehu/mihomo.yaml
+port: 7890
+socks-port: 7891
+allow-lan: true
+mode: rule
+log-level: info
+proxies:
+  - name: "anytls-01-bing"
+    type: anytls
+    server: $PUBLIC_IP
+    port: $p_any1
+    password: "$pw_any1"
+    tls: true
+    sni: "www.bing.com"
+    skip-cert-verify: true
+
+  - name: "anytls-02-reality"
+    type: anytls
+    server: $PUBLIC_IP
+    port: $p_any2
+    password: "$pw_any2"
+    tls: true
+    sni: "$srv_any2"
+    reality-opts:
+      public-key: "$pub_any2"
+      short-id: "$sid_any2"
+
+  - name: "hysteria2-01-bing"
+    type: hysteria2
+    server: $PUBLIC_IP
+    port: $p_hy1
+    password: "$pw_hy1"
+    sni: "www.bing.com"
+    skip-cert-verify: true
+
+  - name: "hysteria2-02-yuming"
+    type: hysteria2
+    server: $HY2_DOMAIN_SERVER
+    port: $p_hy2
+    password: "$pw_hy2"
+    sni: "$HY2_DOMAIN_SERVER"
+    skip-cert-verify: true
+
+  - name: "vless-reality-vision"
+    type: vless
+    server: $PUBLIC_IP
+    port: $p_vvr
+    uuid: "$uuid_vvr"
+    flow: "xtls-rprx-vision"
+    tls: true
+    servername: "$srv_vvr"
+    reality-opts:
+      public-key: "$pub_vvr"
+      short-id: "$sid_vvr"
+
+  - name: "vless-xhttp-reality"
+    type: vless
+    server: $PUBLIC_IP
+    port: $p_vxr
+    uuid: "$uuid_vxr"
+    tls: true
+    servername: "$srv_vxr"
+    network: xhttp
+    reality-opts:
+      public-key: "$pub_vxr"
+      short-id: "$sid_vxr"
+    xhttp-opts:
+      path: "/"
+
+  - name: "tuicv5-01-bing"
+    type: tuic
+    server: $PUBLIC_IP
+    port: $p_tuic
+    uuid: "$uuid_tuic"
+    password: "$pw_tuic"
+    sni: "www.bing.com"
+    skip-cert-verify: true
+    congestion-control: cubic
+
+  - name: "mieru-01-tcp"
+    type: mieru
+    server: $PUBLIC_IP
+    port: $p_m1
+    username: "$u_m1"
+    password: "$pw_m1"
+    transport: TCP
+    mtu: 1400
+
+  - name: "mieru-02-udp"
+    type: mieru
+    server: $PUBLIC_IP
+    port: $p_m2
+    username: "$u_m2"
+    password: "$pw_m2"
+    transport: UDP
+    mtu: 1400
+
+rule-providers: {}
+rules:
+  - MATCH,DIRECT
+EOF
+
+    # 3. 生成 Sing-box 客户端配置 (/etc/sing-box/kehu/client_config.json) - 完整包含 9 个协议
+    cat << EOF > /etc/sing-box/kehu/client_config.json
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "outbounds": [
+    {
+      "type": "anytls",
+      "tag": "anytls-01-bing",
+      "server": "$PUBLIC_IP",
+      "server_port": $p_any1,
+      "password": "$pw_any1",
+      "tls": {
+        "enabled": true,
+        "insecure": true,
+        "server_name": "www.bing.com"
+      }
+    },
+    {
+      "type": "anytls",
+      "tag": "anytls-02-reality",
+      "server": "$PUBLIC_IP",
+      "server_port": $p_any2,
+      "password": "$pw_any2",
+      "tls": {
+        "enabled": true,
+        "server_name": "$srv_any2",
+        "reality": {
+          "enabled": true,
+          "public_key": "$pub_any2",
+          "short_id": "$sid_any2"
+        }
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2-01-bing",
+      "server": "$PUBLIC_IP",
+      "server_port": $p_hy1,
+      "password": "$pw_hy1",
+      "tls": {
+        "enabled": true,
+        "insecure": true,
+        "server_name": "www.bing.com"
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2-02-yuming",
+      "server": "$HY2_DOMAIN_SERVER",
+      "server_port": $p_hy2,
+      "password": "$pw_hy2",
+      "tls": {
+        "enabled": true,
+        "insecure": true,
+        "server_name": "$HY2_DOMAIN_SERVER"
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "vless-reality-vision",
+      "server": "$PUBLIC_IP",
+      "server_port": $p_vvr,
+      "uuid": "$uuid_vvr",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "$srv_vvr",
+        "reality": {
+          "enabled": true,
+          "public_key": "$pub_vvr",
+          "short_id": "$sid_vvr"
+        }
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "vless-xhttp-reality",
+      "server": "$PUBLIC_IP",
+      "server_port": $p_vxr,
+      "uuid": "$uuid_vxr",
+      "tls": {
+        "enabled": true,
+        "server_name": "$srv_vxr",
+        "reality": {
+          "enabled": true,
+          "public_key": "$pub_vxr",
+          "short_id": "$sid_vxr"
+        }
+      },
+      "transport": {
+        "type": "xhttp",
+        "mode": "auto",
+        "host": "$srv_vxr",
+        "path": "/",
+        "x_padding_bytes": "100-1000",
+        "download": {
+          "host": "$srv_vxr",
+          "path": "/",
+          "x_padding_bytes": "100-1000",
+          "tls": {
+            "enabled": true,
+            "server_name": "$srv_vxr"
+          }
+        }
+      }
+    },
+    {
+      "type": "tuic",
+      "tag": "tuicv5-01-bing",
+      "server": "$PUBLIC_IP",
+      "server_port": $p_tuic,
+      "uuid": "$uuid_tuic",
+      "password": "$pw_tuic",
+      "congestion_control": "cubic",
+      "tls": {
+        "enabled": true,
+        "insecure": true,
+        "server_name": "www.bing.com"
+      }
+    },
+    {
+      "type": "mieru",
+      "tag": "mieru-01-tcp",
+      "server": "$PUBLIC_IP",
+      "server_port": $p_m1,
+      "transport": "TCP",
+      "username": "$u_m1",
+      "password": "$pw_m1",
+      "multiplexing": "MULTIPLEXING_LOW",
+      "traffic_pattern": "GgQIARAK",
+      "mtu": 1400,
+      "handshake_mode": "HANDSHAKE_STANDARD"
+    },
+    {
+      "type": "mieru",
+      "tag": "mieru-02-udp",
+      "server": "$PUBLIC_IP",
+      "server_port": $p_m2,
+      "transport": "UDP",
+      "username": "$u_m2",
+      "password": "$pw_m2",
+      "multiplexing": "MULTIPLEXING_LOW",
+      "traffic_pattern": "GgQIARAK",
+      "mtu": 1400,
+      "handshake_mode": "HANDSHAKE_STANDARD"
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ]
+}
+EOF
+
+    echo "[√] 所有客户端配置已成功保存至 /etc/sing-box/kehu/ 目录！"
+    echo "=================================================="
+    echo "📄 订阅与配置文件列表："
+    echo "  1. 链接汇总: /etc/sing-box/kehu/v2ray_links.txt"
+    echo "  2. Mihomo:   /etc/sing-box/kehu/mihomo.yaml"
+    echo "  3. Sing-box: /etc/sing-box/kehu/client_config.json"
+    echo "=================================================="
+    echo "💡 节点链接预览（部分）:"
+    cat /etc/sing-box/kehu/v2ray_links.txt | head -n 15
+    echo "......（更多链接请查看 /etc/sing-box/kehu/v2ray_links.txt 文件）"
+}
 # ==========================================
 # 主菜单循环
 # ==========================================
@@ -1109,6 +1535,8 @@ show_menu() {
     echo "    4. 🚀 运行完整 9 节点交互式配置向导 (含证书检测与独立密钥)"
     echo "    5. 🛡️ 检测/安装防火墙并自动按需放行端口 (带备注)"
     echo "    6. 📝 自动组装并写入 /etc/sing-box/config.json"
+    echo "    7. ⚙️ 创建并启动 sing-box 系统服务 (Systemd)"
+    echo "    8. 📦 生成客户端配置与 9 节点订阅合计 (保存至kehu目录)"
     echo "    0. 退出脚本"
     echo "=================================================="
     read -p "请输入选项数字 [0-6]: " choice < /dev/tty
@@ -1141,6 +1569,16 @@ show_menu() {
             ;;
         6)
             action_generate_config_json
+            echo ""
+            read -p "按回车键返回主菜单..." < /dev/tty
+            ;;
+        7)
+            action_start_singbox
+            echo ""
+            read -p "按回车键返回主菜单..." < /dev/tty
+            ;;
+        8)
+            action_generate_client_configs
             echo ""
             read -p "按回车键返回主菜单..." < /dev/tty
             ;;
