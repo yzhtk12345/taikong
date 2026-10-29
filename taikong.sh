@@ -1638,6 +1638,7 @@ show_menu() {
     echo " - 本地安装版本 : $LOCAL_SB_VER"
     echo " - 远程最新版本 : $REMOTE_SB_VER"
     echo " - 版本检查状态 : $SB_CHECK_STATUS"
+    echo " - bbr检查状态 : $_bbr_check"
     if command -v sing-box &>/dev/null; then
         echo "    -> 程序安装路径 : /usr/local/bin/sing-box"
         echo "    -> 配置文件目录 : /etc/sing-box/"
@@ -1656,7 +1657,7 @@ show_menu() {
     echo "   10. acme 域名申请"
     echo "    0. 退出脚本"
     echo "=================================================="
-    read -p "请输入选项数字 [0-6]: " choice < /dev/tty
+    read -p "请输入选项数字 [0-10]: " choice < /dev/tty
 
     case "$choice" in
         1)
