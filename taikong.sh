@@ -1649,6 +1649,7 @@ show_menu() {
     echo "    6. 自动组装并写入 /etc/sing-box/config.json"
     echo "    7. 创建并启动 sing-box 系统服务 (Systemd)"
     echo "    8. 生成客户端配置与 9 节点订阅合计 (保存至kehu目录)"
+    echo "    9. 开启关闭bbr功能
     echo "    0. 退出脚本"
     echo "=================================================="
     read -p "请输入选项数字 [0-6]: " choice < /dev/tty
