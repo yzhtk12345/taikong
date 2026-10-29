@@ -1512,9 +1512,9 @@ _bbr_check() {
 }
 _bbr_zhenjia(){
         if _bbr_check; then
-            echo " - bbr当前状态 : [ 🔥 BBR 已开启 ]"
+            echo " - bbr当前状态  : [ 🔥 BBR 已开启 ]"
         else
-            echo " - bbr当前状态 : [ ⏳ BBR 未开启 ]"
+            echo " - bbr当前状态  : [ ⏳ BBR 未开启 ]"
         fi
 }
 _bbr_enable() {
