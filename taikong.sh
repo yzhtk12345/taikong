@@ -1612,6 +1612,12 @@ manage_bbr() {
     done
 }
 # ==========================================
+# 功能函数 10: acme 管理功能模块
+# ==========================================
+acme(){
+bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/main/acme.sh)
+}
+# ==========================================
 # 主菜单循环
 # ==========================================
 show_menu() {
@@ -1647,6 +1653,7 @@ show_menu() {
     echo "    7. 创建并启动 sing-box 系统服务 (Systemd)"
     echo "    8. 生成客户端配置与 9 节点订阅合计 (保存至kehu目录)"
     echo "    9. 开启关闭bbr功能"
+    echo "   10. acme 域名申请"
     echo "    0. 退出脚本"
     echo "=================================================="
     read -p "请输入选项数字 [0-6]: " choice < /dev/tty
@@ -1693,6 +1700,11 @@ show_menu() {
             read -p "按回车键返回主菜单..." < /dev/tty
             ;;
         9)
+            manage_bbr
+            echo ""
+            read -p "按回车键返回主菜单..." < /dev/tty
+            ;;
+        10)
             manage_bbr
             echo ""
             read -p "按回车键返回主菜单..." < /dev/tty
