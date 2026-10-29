@@ -1505,72 +1505,69 @@ EOF
 # ==========================================
 # 功能函数 9: BBR 管理功能模块
 # ==========================================
-manage_bbr() {
+_bbr_check() {
+    local result
+    result=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}')
+    [ "$result" = "bbr" ]
+}
+
+_bbr_enable() {
     local sysctl_file="/etc/sysctl.d/99-bbr.conf"
+    echo "----------------------------------------"
+    echo "正在检查系统内核版本与模块支持..."
+    local kernel_version
+    kernel_version=$(uname -r | awk -F. '{print $1*100 + $2}')
+    
+    if [ "$kernel_version" -lt 409 ]; then
+        echo "❌ 错误：当前内核版本低于 4.9，系统不支持原生 BBR！"
+        return 1
+    fi
 
-    # 内部状态检测
-    _check_bbr() {
-        local result
-        result=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}')
-        [ "$result" = "bbr" ]
-    }
+    if ! modprobe tcp_bbr 2>/dev/null; then
+        echo "⚠️ 警告：无法动态加载 tcp_bbr 模块，请检查内核是否编译了 BBR 支持。"
+    fi
 
-    # 内部开启 BBR
-    _enable_bbr() {
-        echo "----------------------------------------"
-        echo "正在检查系统内核版本与模块支持..."
-        local kernel_version
-        kernel_version=$(uname -r | awk -F. '{print $1*100 + $2}')
-        
-        if [ "$kernel_version" -lt 409 ]; then
-            echo "❌ 错误：当前内核版本低于 4.9，系统不支持原生 BBR！"
-            return 1
-        }
-
-        if ! modprobe tcp_bbr 2>/dev/null; then
-            echo "⚠️ 警告：无法动态加载 tcp_bbr 模块，请检查内核是否编译了 BBR 支持。"
+    if [ -d /etc/modules-load.d ]; then
+        echo "tcp_bbr" > /etc/modules-load.d/bbr.conf
+    else
+        if ! grep -Fxq "tcp_bbr" /etc/modules 2>/dev/null; then
+            echo "tcp_bbr" >> /etc/modules
         fi
+    fi
 
-        if [ -d /etc/modules-load.d ]; then
-            echo "tcp_bbr" > /etc/modules-load.d/bbr.conf
-        else
-            if ! grep -Fxq "tcp_bbr" /etc/modules 2>/dev/null; then
-                echo "tcp_bbr" >> /etc/modules
-            fi
-        fi
-
-        mkdir -p /etc/sysctl.d
-        cat > "$sysctl_file" <<EOF
+    mkdir -p /etc/sysctl.d
+    cat > "$sysctl_file" <<EOF
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 EOF
 
-        sysctl --system >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1
-        
-        if _check_bbr; then
-            echo "✅ 成功：BBR 已成功开启并即时生效！"
-        else
-            echo "❌ 警告：配置已写入，但当前未能实时生效，建议重启系统后再次检查。"
-        fi
-        echo "----------------------------------------"
-    }
+    sysctl --system >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1
+    
+    if _bbr_check; then
+        echo "✅ 成功：BBR 已成功开启并即时生效！"
+    else
+        echo "❌ 警告：配置已写入，但当前未能实时生效，建议重启系统后再次检查。"
+    fi
+    echo "----------------------------------------"
+}
 
-    # 内部关闭 BBR
-    _disable_bbr() {
-        echo "----------------------------------------"
-        echo "正在关闭 BBR 并清理配置..."
-        [ -f "$sysctl_file" ] && rm -f "$sysctl_file"
-        [ -f /etc/modules-load.d/bbr.conf ] && rm -f /etc/modules-load.d/bbr.conf
-        sed -i '/tcp_bbr/d' /etc/modules 2>/dev/null
+_bbr_disable() {
+    local sysctl_file="/etc/sysctl.d/99-bbr.conf"
+    echo "----------------------------------------"
+    echo "正在关闭 BBR 并清理配置..."
+    [ -f "$sysctl_file" ] && rm -f "$sysctl_file"
+    [ -f /etc/modules-load.d/bbr.conf ] && rm -f /etc/modules-load.d/bbr.conf
+    sed -i '/tcp_bbr/d' /etc/modules 2>/dev/null
 
-        mkdir -p /etc/sysctl.d
-        echo "net.ipv4.tcp_congestion_control=cubic" > "$sysctl_file"
-        sysctl --system >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1
-        
-        echo "🔒 BBR 已关闭，当前已恢复为系统默认 cubic 算法。"
-        echo "----------------------------------------"
-    }
+    mkdir -p /etc/sysctl.d
+    echo "net.ipv4.tcp_congestion_control=cubic" > "$sysctl_file"
+    sysctl --system >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1
+    
+    echo "🔒 BBR 已关闭，当前已恢复为系统默认 cubic 算法。"
+    echo "----------------------------------------"
+}
 
+manage_bbr() {
     # 权限校验
     if [ $EUID -ne 0 ]; then
        echo "❌ 错误：请使用 root 权限运行此功能！"
@@ -1583,7 +1580,7 @@ EOF
         echo "========================================"
         echo "           BBR 拥塞控制管理             "
         echo "========================================"
-        if _check_bbr; then
+        if _bbr_check; then
             echo "当前状态: [ 🔥 BBR 已开启 ]"
         else
             echo "当前状态: [ ⏳ BBR 未开启 ]"
@@ -1597,12 +1594,12 @@ EOF
         
         case "$sub_choice" in
             1)
-                _enable_bbr
-                read -p "按回车键继续..."
+                _bbr_enable
+                read -p "按回车键继续..." < /dev/tty
                 ;;
             2)
-                _disable_bbr
-                read -p "按回车键继续..."
+                _bbr_disable
+                read -p "按回车键继续..." < /dev/tty
                 ;;
             3)
                 break
