@@ -1510,7 +1510,13 @@ _bbr_check() {
     result=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}')
     [ "$result" = "bbr" ]
 }
-
+_bbr_zhenjia(){
+        if _bbr_check; then
+            echo "当前状态: [ 🔥 BBR 已开启 ]"
+        else
+            echo "当前状态: [ ⏳ BBR 未开启 ]"
+        fi
+}
 _bbr_enable() {
     local sysctl_file="/etc/sysctl.d/99-bbr.conf"
     echo "----------------------------------------"
@@ -1638,7 +1644,7 @@ show_menu() {
     echo " - 本地安装版本 : $LOCAL_SB_VER"
     echo " - 远程最新版本 : $REMOTE_SB_VER"
     echo " - 版本检查状态 : $SB_CHECK_STATUS"
-    echo " - bbr检查状态 : $_bbr_check"
+    echo " - bbr检查状态 : $_bbr_zhenjia"
     if command -v sing-box &>/dev/null; then
         echo "    -> 程序安装路径 : /usr/local/bin/sing-box"
         echo "    -> 配置文件目录 : /etc/sing-box/"
