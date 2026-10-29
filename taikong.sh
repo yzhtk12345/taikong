@@ -1615,7 +1615,7 @@ manage_bbr() {
 # 功能函数 10: acme 管理功能模块
 # ==========================================
 acme(){
-bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/main/acme.sh)
+bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/acme.sh)
 }
 # ==========================================
 # 主菜单循环
