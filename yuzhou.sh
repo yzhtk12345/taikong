@@ -372,46 +372,78 @@ sub_port=$(get_or_create_sub_port)
 sync_to_static_web "/opt/suoha_quick"
 start_sub_server "/var/www/suoha_sub" "$sub_port"
 
-# ==================== 👇 请把下面整段代码“原封不动”粘贴插入到这里 👇 ====================
+# ==================== 👇 完美修复版：固化变量并实现开机自动恢复 👇 ====================
 
-cat > /opt/suoha_quick/start.sh << 'EOF'
+cat > /opt/suoha_quick/start.sh << EOF
 #!/bin/bash
 cd /opt/suoha_quick || exit
-[ -f "xray.pid" ] && kill -9 $(cat xray.pid) 2>/dev/null
-[ -f "cf_vl.pid" ] && kill -9 $(cat cf_vl.pid) 2>/dev/null
-[ -f "cf_tr.pid" ] && kill -9 $(cat cf_tr.pid) 2>/dev/null
+[ -f "xray.pid" ] && kill -9 \$(cat xray.pid) 2>/dev/null
+[ -f "cf_vl.pid" ] && kill -9 \$(cat cf_vl.pid) 2>/dev/null
+[ -f "cf_tr.pid" ] && kill -9 \$(cat cf_tr.pid) 2>/dev/null
 rm -rf argo_vless.log argo_trojan.log
 
+# 1. 启动 Xray
 ./xray/xray run -config xray/config.json >/dev/null 2>&1 &
-echo $! > xray.pid
+echo \$! > xray.pid
 
+# 2. 启动双协议 Argo 临时隧道 (固化当时生成的端口: $port_vless 和 $port_trojan)
 ./cloudflared-linux tunnel --url http://127.0.0.1:$port_vless --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_vless.log 2>&1 &
-echo $! > /opt/suoha_quick/cf_vl.pid
+echo \$! > /opt/suoha_quick/cf_vl.pid
 
 ./cloudflared-linux tunnel --url http://127.0.0.1:$port_trojan --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_trojan.log 2>&1 &
-echo $! > /opt/suoha_quick/cf_tr.pid
+echo \$! > /opt/suoha_quick/cf_tr.pid
 
+# 3. 循环等待新域名生成
 n=0
-while [ $n -lt 30 ]; do
-    n=$((n+1))
-    argo_vl=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_vless.log | head -n 1 | awk -F// '{print $2}')
-    argo_tr=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_trojan.log | head -n 1 | awk -F// '{print $2}')
-    if [[ -n "$argo_vl" && -n "$argo_tr" ]]; then
+while [ \$n -lt 40 ]; do
+    n=\$[ \$n + 1 ]
+    argo_vl=\$(grep -oE "https://[a-zA-Z0-9.-]+\\.trycloudflare\\.com" argo_vless.log | head -n 1 | awk -F// '{print \$2}')
+    argo_tr=\$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\\.com" argo_trojan.log | head -n 1 | awk -F// '{print \$2}')
+    if [[ -n "\$argo_vl" && -n "\$argo_tr" ]]; then
         break
     fi
     sleep 1
 done
 
-if [[ -n "$argo_vl" && -n "$argo_tr" ]]; then
-    uuid=$(python3 -c "import json; print(json.load(open('xray/config.json'))['inbounds'][0]['settings']['clients'][0]['id'])")
+# 4. 如果成功获取新域名，重写 nodes.txt 并刷新订阅
+if [[ -n "\$argo_vl" && -n "\$argo_tr" ]]; then
+    # 重新生成 nodes.txt (基于当前固定的 uuid 和 urlpath)
+    > nodes.txt
+    
+    # 重新拼接 VLESS 节点
+    vless_domains=("\$argo_vl" "cf.090227.xyz" "cloudflare.182682.xyz")
+    vless_labels=("默认Argo" "优选cf.090227" "优选182682")
+    for idx in "\${!vless_domains[@]}"; do
+        d="\${vless_domains[\$idx]}"
+        l="\${vless_labels[\$idx]}"
+        echo "vless://$uuid@\${d}:443?encryption=none&security=tls&sni=\$argo_vl&type=ws&host=\$argo_vl&path=%2F$urlpath_vless#$node_tag-VLESS-\$l-443" >> nodes.txt
+    done
+
+    # 重新拼接 Trojan 节点
+    trojan_domains=("\$argo_tr" "cf.090227.xyz" "cloudflare.182682.xyz")
+    trojan_labels=("默认Argo" "优选cf.090227" "优选182682")
+    for idx in "\${!trojan_domains[@]}"; do
+        d="\${trojan_domains[\$idx]}"
+        l="\${trojan_labels[\$idx]}"
+        echo "trojan://$uuid@\${d}:443?security=tls&sni=\$argo_tr&type=ws&host=\$argo_tr&path=%2F$urlpath_trojan#$node_tag-Trojan-\$l-443" >> nodes.txt
+    done
+
+    # 生成 Base64 订阅
     base64 -w 0 nodes.txt > sub.txt 2>/dev/null || base64 nodes.txt | tr -d '\n' > sub.txt
+    
+    # 同步静态 Web 目录
     mkdir -p /var/www/suoha_sub
     cp -f sub.txt /var/www/suoha_sub/sub.txt
     cp -f clash.yaml /var/www/suoha_sub/clash.yaml
 fi
+
+# 5. 确保开机时恢复 Python 订阅网页服务
+python3 -m http.server $sub_port --directory /var/www/suoha_sub >/dev/null 2>&1 &
 EOF
+
 chmod +x /opt/suoha_quick/start.sh
 
+# 注册 Systemd 开机自启服务
 cat > /lib/systemd/system/suoha-quick.service <<EOF
 [Unit]
 Description=Suoha Quick Tunnel Auto Service
@@ -432,7 +464,7 @@ EOF
 systemctl daemon-reload
 systemctl enable suoha-quick.service >/dev/null 2>&1
 
-# ==================== 👆 插入结束 👆 ====================
+# ==================== 👆 替换结束 👆 ====================
 
 
 
