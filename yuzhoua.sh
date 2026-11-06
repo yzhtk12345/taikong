@@ -768,7 +768,7 @@ EOT
 
 install_hy2_direct() {
     echo "=========================================================="
-    echo "正在部署 Hysteria 2 直连备用节点 (含正确的证书 pinSHA256 指纹)..."
+    echo "正在部署 Hysteria 2 直连备用节点 (固定自签证书与 pinSHA256)..."
     echo "=========================================================="
 
     local xray_dir="/opt/suoha_quick"
@@ -802,12 +802,14 @@ install_hy2_direct() {
     local hy2_port=$((RANDOM % 10000 + 10000))
     local hy2_pass=$(cat /proc/sys/kernel/random/uuid)
 
-    # 3. 在 /opt/suoha_quick/xray/ 目录下生成自签 TLS 证书
+    # 3. 证书处理：仅当不存在时生成一次，确保指纹永久固定！
     mkdir -p "$xray_sub_dir"
-    openssl ecparam -genkey -name prime256v1 -out "${xray_sub_dir}/hy2.key" 2>/dev/null
-    openssl req -new -x509 -days 3650 -key "${xray_sub_dir}/hy2.key" -out "${xray_sub_dir}/hy2.crt" -subj "/CN=bing.com" 2>/dev/null
+    if [ ! -f "${xray_sub_dir}/hy2.crt" ] || [ ! -f "${xray_sub_dir}/hy2.key" ]; then
+        openssl ecparam -genkey -name prime256v1 -out "${xray_sub_dir}/hy2.key" 2>/dev/null
+        openssl req -new -x509 -days 3650 -key "${xray_sub_dir}/hy2.key" -out "${xray_sub_dir}/hy2.crt" -subj "/CN=bing.com" 2>/dev/null
+    fi
 
-    # 4. 严格提取自签证书的 SHA-256 指纹（小写 hex 格式，供 hysteria2 链接与 clash 使用）
+    # 4. 严格提取自签证书的 SHA-256 指纹
     local cert_pin=""
     if [ -f "${xray_sub_dir}/hy2.crt" ]; then
         cert_pin=$(openssl x509 -in "${xray_sub_dir}/hy2.crt" -noout -sha256 -fingerprint 2>/dev/null | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')
@@ -900,7 +902,6 @@ with open('$clash_file', 'w', encoding='utf-8') as f:
     local links_summary=""
     
     if [ -n "$ipv4" ]; then
-        # 严格使用标准 pinSHA256 参数，如果未获取到指纹则回退 insecure=1
         local query_param="alpn=h3"
         if [ -n "$cert_pin" ]; then
             query_param="${query_param}&pinSHA256=${cert_pin}"
@@ -972,8 +973,59 @@ EOT
         fi
     fi
 
+    # 9. 持久化写入开机自启脚本 start.sh (开机自动动态提取现存证书的指纹，绝不重复生成)
+    if [ -f "/opt/suoha_quick/start.sh" ]; then
+        if ! grep -q "Hy2-v4-Backup" /opt/suoha_quick/start.sh && ! grep -q "Hy2-v6-Backup" /opt/suoha_quick/start.sh; then
+            cat >> /opt/suoha_quick/start.sh << EOT
+
+# --- 自动恢复 Hysteria 2 直连备用节点 (固定证书指纹) ---
+hy2_port="${hy2_port}"
+hy2_pass="${hy2_pass}"
+cert_pin="\$(openssl x509 -in /opt/suoha_quick/xray/hy2.crt -noout -sha256 -fingerprint 2>/dev/null | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+v4="\$(curl -4 -s --connect-timeout 2 ip.sb || ip -4 addr show scope global 2>/dev/null | grep inet | awk '{print \$2}' | cut -d/ -f1 | head -n1)"
+v6="\$(curl -6 -s --connect-timeout 2 ip.sb || ip -6 addr show scope global 2>/dev/null | grep inet6 | grep -v 'host' | awk '{print \$2}' | cut -d/ -f1 | head -n1)"
+
+if [ -n "\$v4" ]; then
+    echo "hysteria2://\${hy2_pass}@\${v4}:\${hy2_port}?alpn=h3&pinSHA256=\${cert_pin}#Hy2-v4-Backup" >> nodes.txt
+    cat >> clash.yaml << 'EOF_YAML'
+
+  - name: "Hy2-v4-Backup"
+    type: hysteria2
+    server: \${v4}
+    port: \${hy2_port}
+    password: \${hy2_pass}
+    alpn: ["h3"]
+    pinSHA256: \${cert_pin}
+EOF_YAML
+fi
+
+if [ -n "\$v6" ]; then
+    echo "hysteria2://\${hy2_pass}@[\${v6}]:\${hy2_port}?alpn=h3&pinSHA256=\${cert_pin}#Hy2-v6-Backup" >> nodes.txt
+    cat >> clash.yaml << 'EOF_YAML'
+
+  - name: "Hy2-v6-Backup"
+    type: hysteria2
+    server: \${v6}
+    port: \${hy2_port}
+    password: \${hy2_pass}
+    alpn: ["h3"]
+    pinSHA256: \${cert_pin}
+EOF_YAML
+fi
+
+base64 -w 0 nodes.txt > sub.txt 2>/dev/null || base64 nodes.txt | tr -d '\\n' > sub.txt
+sub_token=\$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
+secure_web_dir="/var/www/suoha_sub/\$sub_token"
+mkdir -p "\$secure_web_dir"
+cp -f sub.txt "\$secure_web_dir/sub.txt"
+cp -f clash.yaml "\$secure_web_dir/clash.yaml"
+cp -f nodes.txt "\$secure_web_dir/nodes.txt"
+EOT
+        fi
+    fi
+
     echo "=========================================================="
-    echo "✅ Hysteria 2 备用节点部署成功，已自动附加 `pinSHA256` 指纹校验！"
+    echo "✅ Hysteria 2 备用节点部署成功，已自动附加固定的 pinSHA256 指纹校验！"
     echo -e "📌 生成结果汇总:${links_summary}"
     echo "=========================================================="
     read -p "按回车键返回主菜单..."
