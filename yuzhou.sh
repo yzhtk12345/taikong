@@ -1300,6 +1300,252 @@ with open('$start_script', 'w', encoding='utf-8') as f:
         esac
     done
 }
+# ==========================================
+# 功能函数 1: 系统初始化与安全加固 (含修改主机名)
+# ==========================================
+action_init_security() {
+    echo -e "\n===================================="
+    echo "  开始执行：系统初始化与安全加固"
+    echo "===================================="
+
+    # 0. 修改主机名
+    echo -e "\n--- [步骤 0/4] 修改主机名 ---"
+    read -p "请输入新的主机名 (直接回车保持当前 [$CURRENT_HOSTNAME]): " NEW_HOSTNAME < /dev/tty
+    if [ -n "$NEW_HOSTNAME" ]; then
+        hostnamectl set-hostname "$NEW_HOSTNAME"
+        CURRENT_HOSTNAME="$NEW_HOSTNAME"
+        echo "[+] 主机名已成功修改为: $NEW_HOSTNAME"
+    else
+        echo "[+] 保持当前主机名不变: $CURRENT_HOSTNAME"
+    fi
+
+    # 1. 创建用户
+    echo -e "\n--- [步骤 1/4] 创建系统新用户 ---"
+    RANDOM_USER="user_$(tr -dc 'a-z0-9' < /dev/urandom | head -c 4)"
+    while true; do
+        read -p "请输入要创建的新用户名 (直接回车将随机生成 [$RANDOM_USER]): " NEW_USER < /dev/tty
+        if [ -z "$NEW_USER" ]; then
+            NEW_USER="$RANDOM_USER"
+            echo "[+] 已自动随机生成用户名: $NEW_USER"
+            break
+        elif id "$NEW_USER" &>/dev/null; then
+            echo "[-] 用户 '$NEW_USER' 已经存在，请更换一个用户名。"
+        else
+            break
+        fi
+    done
+
+    useradd -m -s /bin/bash "$NEW_USER"
+    echo "[+] 请为用户 '$NEW_USER' 设置密码："
+    passwd "$NEW_USER"
+    echo "[+] 用户 '$NEW_USER' 创建成功！"
+
+    # 2. 赋予 sudo 权限
+    echo -e "\n--- [步骤 2/4] 配置 Sudo 权限 ---"
+    if grep -q "^sudo:" /etc/group; then
+        usermod -aG sudo "$NEW_USER"
+        echo "[+] 已将 '$NEW_USER' 添加到 sudo 组"
+    elif grep -q "^wheel:" /etc/group; then
+        usermod -aG wheel "$NEW_USER"
+        echo "[+] 已将 '$NEW_USER' 添加到 wheel 组"
+    else
+        echo "$NEW_USER ALL=(ALL:ALL) ALL" >> /etc/sudoers.d/"$NEW_USER"
+        echo "[+] 已独立写入 sudoers 规则。"
+    fi
+
+    # 3. 修改 SSH 端口
+    echo -e "\n--- [步骤 3/4] 修改 SSH 远程端口 ---"
+    RANDOM_PORT=$((RANDOM % 64512 + 1024))
+    while true; do
+        read -p "请输入新的 SSH 端口 (1024-65535，直接回车随机生成 [$RANDOM_PORT]): " NEW_SSH_PORT < /dev/tty
+        if [ -z "$NEW_SSH_PORT" ]; then
+            NEW_SSH_PORT="$RANDOM_PORT"
+            echo "[+] 已自动随机生成 SSH 端口: $NEW_SSH_PORT"
+            break
+        elif [[ "$NEW_SSH_PORT" =~ ^[0-9]+$ ]] && [ "$NEW_SSH_PORT" -ge 1 ] && [ "$NEW_SSH_PORT" -le 65535 ]; then
+            if [ "$NEW_SSH_PORT" -eq 22 ]; then
+                echo "[-] 提示：你输入的是默认的 22 端口。"
+                read -p "确定要继续使用 22 吗？(y/n): " confirm < /dev/tty
+                [ "$confirm" = "y" ] && break
+            else
+                break
+            fi
+        else
+            echo "[-] 格式错误，请输入 1 到 65535 之间的数字。"
+        fi
+    done
+
+    cp "$SSHD_CONFIG" "${SSHD_CONFIG}.bak_$(date +%F_%T)"
+    if grep -qE "^#?Port " "$SSHD_CONFIG"; then
+        sed -i "s/^#\?Port .*/Port $NEW_SSH_PORT/" "$SSHD_CONFIG"
+    else
+        echo "Port $NEW_SSH_PORT" >> "$SSHD_CONFIG"
+    fi
+
+    # 4. 禁止 Root 登录
+    echo -e "\n--- [步骤 4/4] 禁用 Root 远程登录 ---"
+    if grep -qE "^#?PermitRootLogin " "$SSHD_CONFIG"; then
+        sed -i "s/^#\?PermitRootLogin .*/PermitRootLogin no/" "$SSHD_CONFIG"
+    else
+        echo "PermitRootLogin no" >> "$SSHD_CONFIG"
+    fi
+
+    # 5. 重启 SSH
+    if sshd -t; then
+        if systemctl list-units --full -all | grep -q "ssh.service"; then
+            systemctl restart ssh
+        elif systemctl list-units --full -all | grep -q "sshd.service"; then
+            systemctl restart sshd
+        fi
+        echo "[√] SSH 服务重启成功！"
+    else
+        echo "[-] 错误：SSH 配置文件语法检查未通过！已自动恢复备份。"
+        cp "${SSHD_CONFIG}.bak_"* "$SSHD_CONFIG"
+        return
+    fi
+exec bash
+    echo -e "\n===================================="
+    echo "         安全加固执行完毕！          "
+    echo "===================================="
+    echo " - 当前主机名   : $CURRENT_HOSTNAME"
+    echo " - 新用户名     : $NEW_USER"
+    echo " - 新 SSH 端口  : $NEW_SSH_PORT"
+    echo " - Root 远程登录: 已禁用"
+    echo "------------------------------------"
+    echo " 【警告】请立刻新开终端测试新用户登录，切勿关闭当前窗口！"
+}
+
+# ==========================================
+# 功能函数 9: BBR 管理功能模块
+# ==========================================
+_bbr_check() {
+    local result
+    result=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}')
+    [ "$result" = "bbr" ]
+}
+_bbr_zhenjia(){
+        if _bbr_check; then
+            echo " - bbr当前状态  : [ 🔥 BBR 已开启 ]"
+        else
+            echo " - bbr当前状态  : [ ⏳ BBR 未开启 ]"
+        fi
+}
+_bbr_enable() {
+    local sysctl_file="/etc/sysctl.d/99-bbr.conf"
+    echo "----------------------------------------"
+    echo "正在检查系统内核版本与模块支持..."
+    local kernel_version
+    kernel_version=$(uname -r | awk -F. '{print $1*100 + $2}')
+    
+    if [ "$kernel_version" -lt 409 ]; then
+        echo "❌ 错误：当前内核版本低于 4.9，系统不支持原生 BBR！"
+        return 1
+    fi
+
+    if ! modprobe tcp_bbr 2>/dev/null; then
+        echo "⚠️ 警告：无法动态加载 tcp_bbr 模块，请检查内核是否编译了 BBR 支持。"
+    fi
+
+    if [ -d /etc/modules-load.d ]; then
+        echo "tcp_bbr" > /etc/modules-load.d/bbr.conf
+    else
+        if ! grep -Fxq "tcp_bbr" /etc/modules 2>/dev/null; then
+            echo "tcp_bbr" >> /etc/modules
+        fi
+    fi
+
+    mkdir -p /etc/sysctl.d
+    cat > "$sysctl_file" <<EOF
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+EOF
+
+    sysctl --system >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1
+    
+    if _bbr_check; then
+        echo "✅ 成功：BBR 已成功开启并即时生效！"
+    else
+        echo "❌ 警告：配置已写入，但当前未能实时生效，建议重启系统后再次检查。"
+    fi
+    echo "----------------------------------------"
+}
+
+_bbr_disable() {
+    local sysctl_file="/etc/sysctl.d/99-bbr.conf"
+    echo "----------------------------------------"
+    echo "正在关闭 BBR 并清理配置..."
+    
+    # 1. 清理配置文件和自启模块
+    [ -f "$sysctl_file" ] && rm -f "$sysctl_file"
+    [ -f /etc/modules-load.d/bbr.conf ] && rm -f /etc/modules-load.d/bbr.conf
+    sed -i '/tcp_bbr/d' /etc/modules 2>/dev/null
+
+    # 2. 写入 cubic 配置
+    mkdir -p /etc/sysctl.d
+    echo "net.ipv4.tcp_congestion_control=cubic" > "$sysctl_file"
+    
+    # 3. 实时修改内核参数（移除静默重定向，便于暴露潜在的系统限制错误）
+    echo "正在将内核拥塞控制切换为 cubic..."
+    if ! sysctl -w net.ipv4.tcp_congestion_control=cubic; then
+        echo "⚠️ 提示：实时修改内核参数失败，可能当前系统环境（如部分受限容器或特殊虚拟化VPS）不支持修改。"
+    fi
+
+    # 4. 重新加载系统 sysctl 配置
+    sysctl --system >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1
+    
+    # 5. 严格校验关闭结果
+    if _bbr_check; then
+        echo "❌ 警告：BBR 关闭失败，当前内核状态仍为 bbr！"
+        echo "💡 提示：部分特殊内核（如强制编译启用的定制内核）可能无法直接在运行时关闭 BBR。"
+    else
+        echo "🔒 成功：BBR 已彻底关闭，当前已恢复为系统默认 cubic 算法。"
+    fi
+    echo "----------------------------------------"
+}
+manage_bbr() {
+    # 权限校验
+    if [ $EUID -ne 0 ]; then
+       echo "❌ 错误：请使用 root 权限运行此功能！"
+       return 1
+    fi
+
+    # 子菜单循环
+    while true; do
+        clear
+        echo "========================================"
+        echo "           BBR 拥塞控制管理             "
+        echo "========================================"
+        if _bbr_check; then
+            echo "当前状态: [ 🔥 BBR 已开启 ]"
+        else
+            echo "当前状态: [ ⏳ BBR 未开启 ]"
+        fi
+        echo "----------------------------------------"
+        echo "1. 开启 BBR (检测并尝试启用)"
+        echo "2. 关闭 BBR (恢复系统默认)"
+        echo "3. 返回上一级菜单"
+        echo "========================================"
+        read -p "请输入选项 [1-3]: " sub_choice
+        
+        case "$sub_choice" in
+            1)
+                _bbr_enable
+                read -p "按回车键继续..." < /dev/tty
+                ;;
+            2)
+                _bbr_disable
+                read -p "按回车键继续..." < /dev/tty
+                ;;
+            3)
+                break
+                ;;
+            *)
+                echo "❌ 无效选项，请重新输入。"
+                sleep 1
+                ;;
+        esac
+    done
+}
 
 function installtunnel(){
 mkdir -p /opt/suoha/ >/dev/null 2>&1
@@ -1840,6 +2086,8 @@ echo "4.清空缓存"
 echo "5.额外增加ipv6 ss 共存部署"
 echo "6.额外增加 Hysteria 2 直连备用节点 (含 Clash 同步)"
 echo "7.配置 Cloudflare WARP 灵活路由与分流"
+echo "8.加固vps主机"
+echo "9.开启bbr加速"
 echo -e "0.退出脚本\n"
 read -p "请选择模式(默认1):" mode
 if [ -z "$mode" ]
@@ -1944,6 +2192,12 @@ then
 elif [ $mode == 7 ]
 then
     configure_warp_routing
+elif [ $mode == 8 ]
+then
+    action_init_security    
+elif [ $mode == 9 ]
+then
+    manage_bbr
 else
     echo "退出成功"
     exit
