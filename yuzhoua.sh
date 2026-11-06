@@ -765,6 +765,7 @@ EOT
     echo ""
     read -p "按回车键返回主菜单..."
 }
+
 install_hy2_direct() {
     echo "=========================================================="
     echo "正在智能检测 VPS 网络栈并部署 Hysteria 2 直连备用节点 (含 Clash 同步)..."
@@ -910,7 +911,7 @@ v6="\$(curl -6 -s --connect-timeout 2 ip.sb || ip -6 addr show scope global 2>/d
 
 if [ -n "\$v4" ]; then
     echo "hysteria2://\${hy2_pass}@\${v4}:\${hy2_port}?alpn=h3&insecure=1#Hy2-v4-Backup" >> nodes.txt
-    cat >> clash.yaml << EOT
+    cat >> clash.yaml << 'EOF_YAML'
 
   - name: "Hy2-v4-Backup"
     type: hysteria2
@@ -919,12 +920,12 @@ if [ -n "\$v4" ]; then
     password: \${hy2_pass}
     alpn: ["h3"]
     skip-cert-verify: true
-EOT
+EOF_YAML
 fi
 
 if [ -n "\$v6" ]; then
     echo "hysteria2://\${hy2_pass}@[\${v6}]:\${hy2_port}?alpn=h3&insecure=1#Hy2-v6-Backup" >> nodes.txt
-    cat >> clash.yaml << EOT
+    cat >> clash.yaml << 'EOF_YAML'
 
   - name: "Hy2-v6-Backup"
     type: hysteria2
@@ -933,12 +934,12 @@ if [ -n "\$v6" ]; then
     password: \${hy2_pass}
     alpn: ["h3"]
     skip-cert-verify: true
-EOT
+EOF_YAML
 fi
 
 # 重新生成 Base64 订阅并同步到安全 Token 目录
 base64 -w 0 nodes.txt > sub.txt 2>/dev/null || base64 nodes.txt | tr -d '\\n' > sub.txt
-sub_token=$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
+sub_token=\$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
 secure_web_dir="/var/www/suoha_sub/\$sub_token"
 mkdir -p "\$secure_web_dir"
 cp -f sub.txt "\$secure_web_dir/sub.txt"
