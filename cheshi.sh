@@ -1254,7 +1254,6 @@ EOF_WARP
     fi
 }
 
-
 function installtunnel(){
 mkdir -p /opt/suoha/ >/dev/null 2>&1
 cd /opt/suoha
