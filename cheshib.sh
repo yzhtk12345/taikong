@@ -1079,7 +1079,6 @@ configure_warp_routing() {
         return
     fi
 
-    # 1. 确保安装了必要的依赖工具并创建密钥目录
     if ! command -v warp-cli &>/dev/null; then
         echo "=========================================================="
         echo "正在首次安装并配置 Cloudflare WARP 客户端..."
@@ -1114,7 +1113,6 @@ configure_warp_routing() {
     warp-cli proxy port 40000 >/dev/null 2>&1
     warp-cli connect >/dev/null 2>&1
 
-    # 2. WARP 分流与管理交互菜单
     while true; do
         clear
         echo "=========================================================="
@@ -1237,11 +1235,11 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
                 read -p "按回车键继续..."
                 ;;
             4)
-                echo "正在关闭 WARP 代理并恢复 Xray 默认直连路由..."
+                echo "正在关闭 WARP 代理并彻底清理所有相关路由规则..."
                 warp-cli disconnect >/dev/null 2>&1 || true
                 systemctl stop warp-svc >/dev/null 2>&1 || true
                 
-                # 使用 Python 清理 Xray 配置中的 warp 出口与分流规则
+                # 增强版彻底清理逻辑：只要 outboundTag 是 warp-out 或标签带 warp，全部抹除
                 python3 -c "
 import json
 cfg_file = '$cfg_json'
@@ -1249,23 +1247,25 @@ try:
     with open(cfg_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
     
-    # 移除 warp-out outbound
-    outbounds = data.get('outbounds', [])
-    data['outbounds'] = [ob for ob in outbounds if ob.get('tag'] != 'warp-out']
+    # 1. 彻底清除 outbounds 中的 warp-out
+    if 'outbounds' in data:
+        data['outbounds'] = [ob for ob in data['outbounds'] if ob.get('tag') != 'warp-out']
     
-    # 清理路由规则中与 warp 相关的规则
-    routing = data.get('routing', {})
-    rules = routing.get('rules', [])
-    new_rules = []
-    for r in rules:
-        if r.get('tag') == 'custom-warp-rule' or r.get('outboundTag') == 'warp-out':
-            continue
-        new_rules.append(r)
-    routing['rules'] = new_rules
-    data['routing'] = routing
+    # 2. 彻底清除 routing 中所有与 warp 相关的规则
+    if 'routing' in data and 'rules' in data['routing']:
+        clean_rules = []
+        for r in data['routing']['rules']:
+            outbound_tag = r.get('outboundTag', '')
+            rule_tag = r.get('tag', '')
+            # 无论是自定义分流规则、全局兜底规则，只要 outboundTag 是 warp-out 或 tag 包含 warp，统统剔除
+            if outbound_tag == 'warp-out' or 'warp' in rule_tag.lower():
+                continue
+            clean_rules.append(r)
+        data['routing']['rules'] = clean_rules
     
     with open(cfg_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+    print('✅ 配置文件清理成功')
 except Exception as e:
     print(f'Error: {e}')
 "
@@ -1287,7 +1287,7 @@ with open('$start_script', 'w', encoding='utf-8') as f:
 " 2>/dev/null || true
                 fi
 
-                echo "✅ WARP 已成功关闭，Xray 路由已恢复为默认状态！"
+                echo "✅ WARP 已成功关闭，Xray 路由已完全恢复为纯净直连状态！"
                 read -p "按回车键继续..."
                 ;;
             0)
