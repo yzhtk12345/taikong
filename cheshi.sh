@@ -1091,7 +1091,7 @@ configure_warp_routing() {
             read -p "按回车键返回主菜单..."
             return
         }
-    }
+    fi
 
     systemctl enable --now warp-svc >/dev/null 2>&1
     warp-cli registration new >/dev/null 2>&1 || true
@@ -1259,6 +1259,7 @@ warp-cli connect >/dev/null 2>&1\
 ' "$start_script"
     fi
 }
+
 
 function installtunnel(){
 mkdir -p /opt/suoha/ >/dev/null 2>&1
