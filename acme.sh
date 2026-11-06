@@ -268,7 +268,7 @@ readp "请输入解析完成的域名:" ym
 green "已输入的域名:$ym" && sleep 1
 checkacmeca
 checkip
-if [[ $domainIP =$v4 ]]; then
+if [[ $domainIP = $v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue -d ${ym} --standalone -k ec-256 --server letsencrypt --insecure
 fi
 if [[ $domainIP =$v6 ]]; then
