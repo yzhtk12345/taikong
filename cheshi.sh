@@ -1079,18 +1079,36 @@ configure_warp_routing() {
         return
     fi
 
-    # 确保 WARP 客户端已安装并运行
+    # 1. 确保安装了必要的依赖工具并创建密钥目录
     if ! command -v warp-cli &>/dev/null; then
         echo "=========================================================="
         echo "正在首次安装并配置 Cloudflare WARP 客户端..."
         echo "=========================================================="
-        curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg 2>/dev/null
-        echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com $(. /etc/os-release && echo $VERSION_CODENAME) main" | tee /etc/apt/sources.list.d/cloudflare-warp.list >/dev/null
-        apt update && apt install -y cloudflare-warp || {
-            echo "[错误] WARP 客户端安装失败！"
+        apt update && apt install -y curl gnupg lsb-release >/dev/null 2>&1
+        mkdir -p /usr/share/keyrings
+
+        # 2. 严谨地下载并生成 Cloudflare GPG 密钥
+        if ! curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg; then
+            echo "[错误] 无法下载或生成 Cloudflare GPG 密钥！"
             read -p "按回车键返回主菜单..."
             return
-        }
+        fi
+
+        # 3. 验证密钥文件是否真实存在
+        if [ ! -f "/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg" ]; then
+            echo "[错误] GPG 密钥文件生成失败，路径不存在！"
+            read -p "按回车键返回主菜单..."
+            return
+        fi
+
+        # 4. 写入软件源并安装
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com $(. /etc/os-release && echo $VERSION_CODENAME) main" | tee /etc/apt/sources.list.d/cloudflare-warp.list >/dev/null
+        
+        if ! apt update || ! apt install -y cloudflare-warp; then
+            echo "[错误] WARP 客户端包安装失败！"
+            read -p "按回车键返回主菜单..."
+            return
+        fi
     fi
 
     systemctl enable --now warp-svc >/dev/null 2>&1
@@ -1099,6 +1117,7 @@ configure_warp_routing() {
     warp-cli proxy port 40000 >/dev/null 2>&1
     warp-cli connect >/dev/null 2>&1
 
+    # 5. WARP 分流交互菜单
     while true; do
         clear
         echo "=========================================================="
@@ -1124,15 +1143,12 @@ configure_warp_routing() {
                     continue
                 fi
 
-                # 使用 Python 将用户输入的域名追加/更新到 Xray 规则中
                 python3 -c "
 import json
-
 cfg_file = '$cfg_json'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
-# 确保 outbounds 包含 warp-out
 outbounds = data.get('outbounds', [])
 if not any(ob.get('tag') == 'warp-out' for ob in outbounds):
     outbounds.append({
@@ -1142,11 +1158,9 @@ if not any(ob.get('tag') == 'warp-out' for ob in outbounds):
     })
 data['outbounds'] = outbounds
 
-# 处理路由规则
 routing = data.get('routing', {'domainStrategy': 'AsIs', 'rules': []})
 rules = routing.get('rules', [])
 
-# 查找或创建名为 custom-warp-rule 的规则
 custom_rule = None
 for r in rules:
     if r.get('tag') == 'custom-warp-rule':
@@ -1175,10 +1189,9 @@ data['routing'] = routing
 with open(cfg_file, 'w', encoding='utf-8') as f:
     json.dump(data, f, indent=4, ensure_ascii=False)
 "
-                # 重启 Xray 核心
                 pkill -f xray || true
-                nohup /opt/suoha_quick/xray/xray run -config "$cfg_json" >/dev/null 2>&1 &
-                echo $! > /opt/suoha_quick/xray.pid
+                nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
+                echo $! > "${xray_dir}/xray.pid"
                 echo "✅ 自定义域名规则已成功注入并生效！"
                 read -p "按回车键继续..."
                 ;;
@@ -1186,7 +1199,6 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
                 echo "正在切换为全局 WARP 模式..."
                 python3 -c "
 import json
-
 cfg_file = '$cfg_json'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
@@ -1200,25 +1212,12 @@ if not any(ob.get('tag') == 'warp-out' for ob in outbounds):
     })
 data['outbounds'] = outbounds
 
-# 设置全局路由：除直连外，其余全部走 warp-out
 routing = {
     'domainStrategy': 'AsIs',
     'rules': [
-        {
-            'type': 'field',
-            'outboundTag': 'direct',
-            'ip': ['geoip:private', 'geoip:cn']
-        },
-        {
-            'type': 'field',
-            'outboundTag': 'direct',
-            'domain': ['geosite:cn']
-        },
-        {
-            'type': 'field',
-            'outboundTag': 'warp-out',
-            'network': 'tcp,udp'
-        }
+        { 'type': 'field', 'outboundTag': 'direct', 'ip': ['geoip:private', 'geoip:cn'] },
+        { 'type': 'field', 'outboundTag': 'direct', 'domain': ['geosite:cn'] },
+        { 'type': 'field', 'outboundTag': 'warp-out', 'network': 'tcp,udp' }
     ]
 }
 data['routing'] = routing
@@ -1227,8 +1226,8 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
     json.dump(data, f, indent=4, ensure_ascii=False)
 "
                 pkill -f xray || true
-                nohup /opt/suoha_quick/xray/xray run -config "$cfg_json" >/dev/null 2>&1 &
-                echo $! > /opt/suoha_quick/xray.pid
+                nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
+                echo $! > "${xray_dir}/xray.pid"
                 echo "✅ 已成功切换为【全局 WARP 模式】（国内直连，其余全走 WARP）！"
                 read -p "按回车键继续..."
                 ;;
@@ -1249,14 +1248,15 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
         esac
     done
 
-    # 持久化写入自启脚本 start.sh
-    local start_script="/opt/suoha_quick/start.sh"
+    # 6. 安全地将 WARP 恢复机制写入 start.sh
+    local start_script="${xray_dir}/start.sh"
     if [ -f "$start_script" ] && ! grep -q "warp-cli connect" "$start_script"; then
-        sed -i '/# --- HY2 CONFIG START ---/i \
-# --- 自动恢复 WARP 代理服务 ---\
-systemctl restart warp-svc >/dev/null 2>&1\
-warp-cli connect >/dev/null 2>&1\
-' "$start_script"
+        cat >> "$start_script" << 'EOF_WARP'
+
+# --- 自动恢复 WARP 代理服务 ---
+systemctl restart warp-svc >/dev/null 2>&1
+warp-cli connect >/dev/null 2>&1
+EOF_WARP
     fi
 }
 
