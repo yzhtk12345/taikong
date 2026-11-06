@@ -692,7 +692,49 @@ except Exception:
     fi
 
     sync_to_static_web "$xray_dir"
+# 1. 同步到带安全 Token 的子目录
+            if [ -f "/etc/suoha_sub_token" ]; then
+                local sub_token=$(cat /etc/suoha_sub_token 2>/dev/null)
+                local secure_web_dir="/var/www/suoha_sub/${sub_token}"
+                if [ -d "$secure_web_dir" ]; then
+                    cp -f "${xray_dir}/sub.txt" "${secure_web_dir}/sub.txt" 2>/dev/null
+                    cp -f "${xray_dir}/clash.yaml" "${secure_web_dir}/clash.yaml" 2>/dev/null
+                    cp -f "${xray_dir}/nodes.txt" "${secure_web_dir}/nodes.txt" 2>/dev/null
+                fi
+            fi
 
+            # 2. 将 SS 节点持久化写入开机自启脚本 start.sh，防止重启丢失
+            if [ $is_installed_mode -eq 0 ] && [ -f "/opt/suoha_quick/start.sh" ]; then
+                if ! grep -q "IPv6-SS-Direct" /opt/suoha_quick/start.sh; then
+                    cat >> /opt/suoha_quick/start.sh << EOT
+
+# --- 自动恢复 IPv6 SS 直连节点 ---
+if [[ -n "\$ss_link" ]] || true; then
+    ss_port="${ss_port}"
+    ss_method="${ss_method}"
+    ss_password="${ss_password}"
+    ipv6_addr="${ipv6_addr}"
+    ss_user_info="\${ss_method}:\${ss_password}"
+    if [ \$(grep -i PRETTY_NAME /etc/os-release | cut -d \\" -f2 | awk '{print \$1}') == "Alpine" ]; then
+        ss_base64=\$(echo -n "\$ss_user_info" | base64 | tr -d '\\n')
+    else
+        ss_base64=\$(echo -n "\$ss_user_info" | base64 -w 0)
+    fi
+    ss_link="ss://\${ss_base64}@[\${ipv6_addr}]:\${ss_port}#IPv6-SS-Direct"
+    
+    echo "\$ss_link" >> nodes.txt
+    
+    # 重新生成 Base64 订阅并同步到安全 Token 目录
+    base64 -w 0 nodes.txt > sub.txt 2>/dev/null || base64 nodes.txt | tr -d '\\n' > sub.txt
+    sub_token=\$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
+    secure_web_dir="/var/www/suoha_sub/\$sub_token"
+    mkdir -p "\$secure_web_dir"
+    cp -f sub.txt "\$secure_web_dir/sub.txt"
+    cp -f clash.yaml "\$secure_web_dir/clash.yaml"
+fi
+EOT
+                fi
+            fi
     # 2. 在它下面紧接着加上这一段（同步到带 Token 的加密子目录）
     if [ -f "/etc/suoha_sub_token" ]; then
         local sub_token=$(cat /etc/suoha_sub_token 2>/dev/null)
