@@ -271,7 +271,7 @@ checkip
 if [[ $domainIP = $v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue -d ${ym} --standalone -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP =$v6 ]]; then
+if [[ $domainIP = $v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue -d ${ym} --standalone -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 installCA
@@ -309,10 +309,10 @@ else
     readp "请复制Cloudflare的Global API Key：" GAK
     export CF_Key="$GAK"
 fi
-if [[ $domainIP =$v4 ]]; then
+if [[ $domainIP = $v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP =$v6 ]]; then
+if [[ $domainIP = $v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 ;;
@@ -321,10 +321,10 @@ readp "请复制腾讯云DNSPod的DP_Id：" DPID
 export DP_Id="$DPID"
 readp "请复制腾讯云DNSPod的DP_Key：" DPKEY
 export DP_Key="$DPKEY"
-if [[ $domainIP =$v4 ]]; then
+if [[ $domainIP = $v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_dp -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP =$v6 ]]; then
+if [[ $domainIP = $v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_dp -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 ;;
@@ -333,10 +333,10 @@ readp "请复制阿里云Aliyun的Ali_Key：" ALKEY
 export Ali_Key="$ALKEY"
 readp "请复制阿里云Aliyun的Ali_Secret：" ALSER
 export Ali_Secret="$ALSER"
-if [[ $domainIP =$v4 ]]; then
+if [[ $domainIP = $v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_ali -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP =$v6 ]]; then
+if [[ $domainIP = $v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_ali -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 esac
