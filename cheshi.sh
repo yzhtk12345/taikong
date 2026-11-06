@@ -1086,8 +1086,12 @@ configure_warp_routing() {
         apt update && apt install -y curl gnupg lsb-release >/dev/null 2>&1
         mkdir -p /usr/share/keyrings
 
-        curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o /usr/share/keyrings/cloudflare-warp-archive-keyring.asc
-        
+        if ! curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o /usr/share/keyrings/cloudflare-warp-archive-keyring.asc; then
+            echo "[错误] 无法下载 Cloudflare GPG 密钥！"
+            read -p "按回车键返回主菜单..."
+            return
+        fi
+
         if [ ! -f "/usr/share/keyrings/cloudflare-warp-archive-keyring.asc" ]; then
             echo "[错误] GPG 密钥文件保存失败！"
             read -p "按回车键返回主菜单..."
@@ -1117,9 +1121,10 @@ configure_warp_routing() {
         echo "1. 自定义添加指定域名/应用走 WARP (交互式输入)"
         echo "2. 切换为【全局模式】：所有外网流量强制走 WARP"
         echo "3. 查看当前 WARP 路由状态"
+        echo "4. 关闭并停用 WARP 代理（恢复默认直连路由）"
         echo "0. 返回上级主菜单"
         echo "=========================================================="
-        read -p "请选择操作 [0-3]: " warp_choice
+        read -p "请选择操作 [0-4]: " warp_choice
 
         case "$warp_choice" in
             1)
@@ -1229,6 +1234,62 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
                 echo ""
                 read -p "按回车键继续..."
                 ;;
+            4)
+                echo "正在关闭 WARP 代理并彻底清理所有相关路由规则..."
+                warp-cli disconnect >/dev/null 2>&1 || true
+                systemctl stop warp-svc >/dev/null 2>&1 || true
+                
+                # 增强版彻底清理逻辑：只要 outboundTag 是 warp-out 或标签带 warp，全部抹除
+                python3 -c "
+import json
+cfg_file = '$cfg_json'
+try:
+    with open(cfg_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    # 1. 彻底清除 outbounds 中的 warp-out
+    if 'outbounds' in data:
+        data['outbounds'] = [ob for ob in data['outbounds'] if ob.get('tag') != 'warp-out']
+    
+    # 2. 彻底清除 routing 中所有与 warp 相关的规则
+    if 'routing' in data and 'rules' in data['routing']:
+        clean_rules = []
+        for r in data['routing']['rules']:
+            outbound_tag = r.get('outboundTag', '')
+            rule_tag = r.get('tag', '')
+            # 无论是自定义分流规则、全局兜底规则，只要 outboundTag 是 warp-out 或 tag 包含 warp，统统剔除
+            if outbound_tag == 'warp-out' or 'warp' in rule_tag.lower():
+                continue
+            clean_rules.append(r)
+        data['routing']['rules'] = clean_rules
+    
+    with open(cfg_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+    print('✅ 配置文件清理成功')
+except Exception as e:
+    print(f'Error: {e}')
+"
+                # 重启 Xray 核心
+                pkill -f xray || true
+                nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
+                echo $! > "${xray_dir}/xray.pid"
+
+                # 从 start.sh 移除自启恢复逻辑
+                local start_script="${xray_dir}/start.sh"
+                if [ -f "$start_script" ]; then
+                    python3 -c "
+with open('$start_script', 'r', encoding='utf-8') as f:
+    content = f.read()
+import re
+content = re.sub(r'# --- 自动恢复 WARP 代理服务 ---[\s\S]*?warp-cli connect >/dev/null 2>&1\n?', '', content)
+with open('$start_script', 'w', encoding='utf-8') as f:
+    f.write(content)
+" 2>/dev/null || true
+                fi
+
+                echo "✅ WARP 已成功关闭，Xray 路由已完全恢复为纯净直连状态！"
+                read -p "按回车键继续..."
+                ;;
             0)
                 break
                 ;;
@@ -1238,18 +1299,6 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
                 ;;
         esac
     done
-
-    local start_script="${xray_dir}/start.sh"
-    if [ -f "$start_script" ]; then
-        if ! grep -q "warp-cli connect" "$start_script"; then
-            cat >> "$start_script" << 'EOF_WARP'
-
-# --- 自动恢复 WARP 代理服务 ---
-systemctl restart warp-svc >/dev/null 2>&1
-warp-cli connect >/dev/null 2>&1
-EOF_WARP
-        fi
-    fi
 }
 
 function installtunnel(){
