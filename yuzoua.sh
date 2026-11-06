@@ -693,6 +693,17 @@ except Exception:
 
     sync_to_static_web "$xray_dir"
 
+    # 2. 在它下面紧接着加上这一段（同步到带 Token 的加密子目录）
+    if [ -f "/etc/suoha_sub_token" ]; then
+        local sub_token=$(cat /etc/suoha_sub_token 2>/dev/null)
+        local secure_web_dir="/var/www/suoha_sub/${sub_token}"
+        if [ -d "$secure_web_dir" ]; then
+            cp -f "${xray_dir}/sub.txt" "${secure_web_dir}/sub.txt" 2>/dev/null
+            cp -f "${xray_dir}/clash.yaml" "${secure_web_dir}/clash.yaml" 2>/dev/null
+            cp -f "${xray_dir}/nodes.txt" "${secure_web_dir}/nodes.txt" 2>/dev/null
+        fi
+    fi
+
     local sub_port=$(get_or_create_sub_port)
     local server_ip=$(get_server_ip)
     local sub_online_url="http://${server_ip}:${sub_port}/sub.txt"
