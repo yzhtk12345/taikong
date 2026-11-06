@@ -1590,9 +1590,6 @@ then
 elif [ $mode == 5 ]
 then
     install_ipv6_ss
-else
-    echo "退出成功"
-    exit
 elif [ $mode == 6 ]
 then
     install_hy2_direct
