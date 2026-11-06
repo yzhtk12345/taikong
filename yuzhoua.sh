@@ -768,10 +768,11 @@ EOT
 
 install_hy2_direct() {
     echo "=========================================================="
-    echo "正在智能检测网络栈并部署 Hysteria 2 直连备用节点..."
+    echo "正在部署 Hysteria 2 直连备用节点 (证书存放在 xray 目录下)..."
     echo "=========================================================="
 
     local xray_dir="/opt/suoha_quick"
+    local xray_sub_dir="/opt/suoha_quick/xray"
     local cfg_json="/opt/suoha_quick/xray/config.json"
     
     if [ ! -f "$cfg_json" ]; then
@@ -801,12 +802,18 @@ install_hy2_direct() {
     local hy2_port=$((RANDOM % 10000 + 10000))
     local hy2_pass=$(cat /proc/sys/kernel/random/uuid)
 
-    # 3. 生成自签 TLS 证书供 Hysteria 2 / HTTP/3 使用
-    mkdir -p /etc/xray
-    openssl ecparam -genkey -name prime256v1 -out /etc/xray/hy2.key 2>/dev/null
-    openssl req -new -x509 -days 3650 -key /etc/xray/hy2.key -out /etc/xray/hy2.crt -subj "/CN=bing.com" 2>/dev/null
+    # 3. 在 /opt/suoha_quick/xray/ 目录下生成自签 TLS 证书
+    mkdir -p "$xray_sub_dir"
+    openssl ecparam -genkey -name prime256v1 -out "${xray_sub_dir}/hy2.key" 2>/dev/null
+    openssl req -new -x509 -days 3650 -key "${xray_sub_dir}/hy2.key" -out "${xray_sub_dir}/hy2.crt" -subj "/CN=bing.com" 2>/dev/null
 
-    # 4. 防火墙放行 UDP 端口
+    # 4. 提取自签证书的 SHA-256 指纹
+    local cert_pin=""
+    if [ -f "${xray_sub_dir}/hy2.crt" ]; then
+        cert_pin=$(openssl x509 -in "${xray_sub_dir}/hy2.crt" -noout -sha256 -fingerprint 2>/dev/null | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+    fi
+
+    # 5. 防火墙放行 UDP 端口
     if [ -n "$ipv4" ]; then
         iptables -A INPUT -p udp --dport ${hy2_port} -j ACCEPT 2>/dev/null || true
     fi
@@ -814,7 +821,7 @@ install_hy2_direct() {
         ip6tables -A INPUT -p udp --dport ${hy2_port} -j ACCEPT 2>/dev/null || true
     fi
 
-    # 5. 使用 Python 安全注入 Hysteria 2 入站配置到正确的 config.json 中
+    # 6. 使用 Python 安全注入 Hysteria 2 入站配置（证书路径指向新位置）
     python3 -c "
 import json, sys
 
@@ -842,8 +849,8 @@ try:
             'tlsSettings': {
                 'alpn': ['h3'],
                 'certificates': [{
-                    'certificateFile': '/etc/xray/hy2.crt',
-                    'keyFile': '/etc/xray/hy2.key'
+                    'certificateFile': '/opt/suoha_quick/xray/hy2.crt',
+                    'keyFile': '/opt/suoha_quick/xray/hy2.key'
                 }]
             }
         }
@@ -872,7 +879,7 @@ except Exception as e:
     nohup /opt/suoha_quick/xray/xray run -config "$cfg_json" >/dev/null 2>&1 &
     echo $! > /opt/suoha_quick/xray.pid
 
-    # 6. 清理旧的 Hy2 节点后重新追加，并同步写入 clash.yaml
+    # 7. 清理旧的 Hy2 节点后重新追加，并同步写入 clash.yaml
     local work_nodes="${xray_dir}/nodes.txt"
     local clash_file="${xray_dir}/clash.yaml"
     
@@ -880,12 +887,10 @@ except Exception as e:
     sed -i '/Hy2-v4-Backup/d' "$work_nodes"
     sed -i '/Hy2-v6-Backup/d' "$work_nodes"
 
-    # 清理 clash.yaml 中旧的 Hy2 节点块
     if [ -f "$clash_file" ]; then
         python3 -c "
 with open('$clash_file', 'r', encoding='utf-8') as f:
     content = f.read()
-# 简单移除旧的 hy2 块（如果存在）
 import re
 content = re.sub(r'\n\s*-\s*name:\s*\"Hy2-v[46]-Backup\"[\s\S]*?(?=\n\s*-\s*name:|\nproxy-groups:|\Z)', '', content)
 with open('$clash_file', 'w', encoding='utf-8') as f:
@@ -896,7 +901,14 @@ with open('$clash_file', 'w', encoding='utf-8') as f:
     local links_summary=""
     
     if [ -n "$ipv4" ]; then
-        local hy2_link_v4="hysteria2://${hy2_pass}@${ipv4}:${hy2_port}?alpn=h3&insecure=1#Hy2-v4-Backup"
+        local query_param="alpn=h3"
+        if [ -n "$cert_pin" ]; then
+            query_param="${query_param}&pin=${cert_pin}"
+        else
+            query_param="${query_param}&insecure=1"
+        fi
+
+        local hy2_link_v4="hysteria2://${hy2_pass}@${ipv4}:${hy2_port}?${query_param}#Hy2-v4-Backup"
         echo "$hy2_link_v4" >> "$work_nodes"
         links_summary="${links_summary}\n   👉 IPv4 备用节点: ${hy2_link_v4}"
 
@@ -916,7 +928,14 @@ EOT
     fi
 
     if [ -n "$ipv6" ]; then
-        local hy2_link_v6="hysteria2://${hy2_pass}@[${ipv6}]:${hy2_port}?alpn=h3&insecure=1#Hy2-v6-Backup"
+        local query_param="alpn=h3"
+        if [ -n "$cert_pin" ]; then
+            query_param="${query_param}&pin=${cert_pin}"
+        else
+            query_param="${query_param}&insecure=1"
+        fi
+
+        local hy2_link_v6="hysteria2://${hy2_pass}@[${ipv6}]:${hy2_port}?${query_param}#Hy2-v6-Backup"
         echo "$hy2_link_v6" >> "$work_nodes"
         links_summary="${links_summary}\n   👉 IPv6 备用节点: ${hy2_link_v6}"
 
@@ -935,7 +954,7 @@ EOT
         fi
     fi
 
-    # 7. 重新生成 Base64 订阅并同步到安全 Token 目录
+    # 8. 重新生成 Base64 订阅并同步到安全 Token 目录
     if [ $(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}') == "Alpine" ]; then
         base64 "$work_nodes" | tr -d '\n' > "${xray_dir}/sub.txt"
     else
@@ -954,7 +973,7 @@ EOT
     fi
 
     echo "=========================================================="
-    echo "✅ Hysteria 2 备用节点注入成功并已生效！"
+    echo "✅ Hysteria 2 备用节点部署成功，证书已存放在 /opt/suoha_quick/xray/ 下！"
     echo -e "📌 生成结果汇总:${links_summary}"
     echo "=========================================================="
     read -p "按回车键返回主菜单..."
