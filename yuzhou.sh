@@ -2077,7 +2077,7 @@ echo "安装服务模式,需要有CF托管域名,并且需要按照提示手动�
 echo "首次绑定ARGO服务后如果不想再次跳转网页绑定"
 echo "将已经绑定的系统目录下的 /root/.cloudflared 文件夹以及内容"
 echo "拷贝至新系统下同样的目录,会自动跳过登录验证"
-echo "域名注册使用这个测试版 bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/acme.sh)"
+echo '域名注册使用这个测试版 bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/acme.sh)'
 echo -e "\n梭哈是一种智慧!!!梭哈!梭哈!梭哈!梭哈!梭哈!梭哈!梭哈...\n"
 echo "1.梭哈模式 (自动生成 VLESS+Trojan 443 TLS 优选节点)"
 echo "2.安装服务 (自定义域名绑定固定隧道)"
