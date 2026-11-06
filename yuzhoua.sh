@@ -454,7 +454,7 @@ if [[ -n "\$argo_vl" && -n "\$argo_tr" ]]; then
     
     # 同步静态 Web 目录
     # 同步到带安全 Token 的子目录（确保重启后 Token 和路径依然一致）
-    sub_token=\$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
+    sub_token=$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
     secure_web_dir="/var/www/suoha_sub/\$sub_token"
     mkdir -p "\$secure_web_dir"
     cp -f sub.txt "\$secure_web_dir/sub.txt"
@@ -726,7 +726,7 @@ if [[ -n "\$ss_link" ]] || true; then
     
     # 重新生成 Base64 订阅并同步到安全 Token 目录
     base64 -w 0 nodes.txt > sub.txt 2>/dev/null || base64 nodes.txt | tr -d '\\n' > sub.txt
-    sub_token=\$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
+    sub_token=$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
     secure_web_dir="/var/www/suoha_sub/\$sub_token"
     mkdir -p "\$secure_web_dir"
     cp -f sub.txt "\$secure_web_dir/sub.txt"
@@ -938,7 +938,7 @@ fi
 
 # 重新生成 Base64 订阅并同步到安全 Token 目录
 base64 -w 0 nodes.txt > sub.txt 2>/dev/null || base64 nodes.txt | tr -d '\\n' > sub.txt
-sub_token=\$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
+sub_token=$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
 secure_web_dir="/var/www/suoha_sub/\$sub_token"
 mkdir -p "\$secure_web_dir"
 cp -f sub.txt "\$secure_web_dir/sub.txt"
