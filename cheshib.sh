@@ -2064,6 +2064,9 @@ then
 elif [ $mode == 8 ]
 then
     action_init_security    
+elif [ $mode == 9 ]
+then
+    xxxxx
 else
     echo "退出成功"
     exit
