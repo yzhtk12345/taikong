@@ -1079,7 +1079,6 @@ configure_warp_routing() {
         return
     fi
 
-    # 1. 确保安装了必要的依赖工具并创建密钥目录
     if ! command -v warp-cli &>/dev/null; then
         echo "=========================================================="
         echo "正在首次安装并配置 Cloudflare WARP 客户端..."
@@ -1087,21 +1086,18 @@ configure_warp_routing() {
         apt update && apt install -y curl gnupg lsb-release >/dev/null 2>&1
         mkdir -p /usr/share/keyrings
 
-        # 2. 直接下载并保存为兼容 Debian 13 (Trixie) sqv 的 ASCII-armored (.asc) 密钥
         if ! curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o /usr/share/keyrings/cloudflare-warp-archive-keyring.asc; then
             echo "[错误] 无法下载 Cloudflare GPG 密钥！"
             read -p "按回车键返回主菜单..."
             return
         fi
 
-        # 3. 验证密钥文件是否真实存在
         if [ ! -f "/usr/share/keyrings/cloudflare-warp-archive-keyring.asc" ]; then
-            echo "[错误] GPG 密钥文件保存失败，路径不存在！"
+            echo "[错误] GPG 密钥文件保存失败！"
             read -p "按回车键返回主菜单..."
             return
-        }
+        fi
 
-        # 4. 写入使用 .asc 密钥的软件源并安装
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.asc] https://pkg.cloudflareclient.com $(. /etc/os-release && echo $VERSION_CODENAME) main" | tee /etc/apt/sources.list.d/cloudflare-warp.list >/dev/null
         
         if ! apt update || ! apt install -y cloudflare-warp; then
@@ -1117,7 +1113,6 @@ configure_warp_routing() {
     warp-cli proxy port 40000 >/dev/null 2>&1
     warp-cli connect >/dev/null 2>&1
 
-    # 5. WARP 分流交互菜单
     while true; do
         clear
         echo "=========================================================="
@@ -1248,7 +1243,6 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
         esac
     done
 
-    # 6. 安全地将 WARP 恢复机制写入 start.sh
     local start_script="${xray_dir}/start.sh"
     if [ -f "$start_script" ] && ! grep -q "warp-cli connect" "$start_script"; then
         cat >> "$start_script" << 'EOF_WARP'
