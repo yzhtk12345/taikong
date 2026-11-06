@@ -768,7 +768,7 @@ EOT
 
 install_hy2_direct() {
     echo "=========================================================="
-    echo "正在部署 Hysteria 2 直短备用节点 (含开机防火墙自动放行)..."
+    echo "正在部署 Hysteria 2 直连备用节点 (防丢失与自愈增强版)..."
     echo "=========================================================="
 
     local xray_dir="/opt/suoha_quick"
@@ -973,12 +973,26 @@ EOT
         fi
     fi
 
-    # 9. 持久化写入开机自启脚本 start.sh (开机自动放行防火墙端口 + 恢复节点)
-    if [ -f "/opt/suoha_quick/start.sh" ]; then
-        if ! grep -q "Hy2-v4-Backup" /opt/suoha_quick/start.sh && ! grep -q "Hy2-v6-Backup" /opt/suoha_quick/start.sh; then
-            cat >> /opt/suoha_quick/start.sh << EOT
+    # 9. 智能更新开机脚本 start.sh（采用标记块覆盖，确保每次运行都能更新到最新逻辑）
+    local start_script="/opt/suoha_quick/start.sh"
+    if [ ! -f "$start_script" ]; then
+        echo "#!/bin/bash" > "$start_script"
+    fi
 
-# --- 自动恢复 Hysteria 2 直连备用节点 (含防火墙自动放行与固定证书指纹) ---
+    # 用 Python 移除旧的 HY2 块（如果存在），防止死代码残留或无法更新
+    python3 -c "
+with open('$start_script', 'r', encoding='utf-8') as f:
+    content = f.read()
+import re
+content = re.sub(r'# --- HY2 CONFIG START ---[\s\S]*?# --- HY2 CONFIG END ---', '', content)
+with open('$start_script', 'w', encoding='utf-8') as f:
+    f.write(content.strip() + '\n')
+" 2>/dev/null || true
+
+    # 写入最新的带防火墙放行、固定指纹及防重复清理机制的自愈逻辑
+    cat >> "$start_script" << EOT
+
+# --- HY2 CONFIG START ---
 hy2_port="${hy2_port}"
 hy2_pass="${hy2_pass}"
 
@@ -990,9 +1004,25 @@ if command -v ip6tables &>/dev/null; then
     ip6tables -A INPUT -p udp --dport \${hy2_port} -j ACCEPT 2>/dev/null || true
 fi
 
+# 获取持久固定的证书指纹
 cert_pin="\$(openssl x509 -in /opt/suoha_quick/xray/hy2.crt -noout -sha256 -fingerprint 2>/dev/null | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
 v4="\$(curl -4 -s --connect-timeout 2 ip.sb || ip -4 addr show scope global 2>/dev/null | grep inet | awk '{print \$2}' | cut -d/ -f1 | head -n1)"
 v6="\$(curl -6 -s --connect-timeout 2 ip.sb || ip -6 addr show scope global 2>/dev/null | grep inet6 | grep -v 'host' | awk '{print \$2}' | cut -d/ -f1 | head -n1)"
+
+# 清理 nodes.txt 和 clash.yaml 中旧的 Hy2 节点，防止重启导致重复堆积
+sed -i '/Hy2-v4-Backup/d' nodes.txt 2>/dev/null || true
+sed -i '/Hy2-v6-Backup/d' nodes.txt 2>/dev/null || true
+
+if [ -f "clash.yaml" ]; then
+    python3 -c "
+with open('clash.yaml', 'r', encoding='utf-8') as f:
+    content = f.read()
+import re
+content = re.sub(r'\n\s*-\s*name:\s*\"Hy2-v[46]-Backup\"[\s\S]*?(?=\n\s*-\s*name:|\nproxy-groups:|\Z)', '', content)
+with open('clash.yaml', 'w', encoding='utf-8') as f:
+    f.write(content)
+" 2>/dev/null || true
+fi
 
 if [ -n "\$v4" ]; then
     echo "hysteria2://\${hy2_pass}@\${v4}:\${hy2_port}?alpn=h3&pinSHA256=\${cert_pin}#Hy2-v4-Backup" >> nodes.txt
@@ -1029,12 +1059,11 @@ mkdir -p "\$secure_web_dir"
 cp -f sub.txt "\$secure_web_dir/sub.txt"
 cp -f clash.yaml "\$secure_web_dir/clash.yaml"
 cp -f nodes.txt "\$secure_web_dir/nodes.txt"
+# --- HY2 CONFIG END ---
 EOT
-        fi
-    fi
 
     echo "=========================================================="
-    echo "✅ Hysteria 2 备用节点部署成功，已加入开机防火墙放行与指纹维持逻辑！"
+    echo "✅ Hysteria 2 备用节点部署成功！已彻底解决重启失效与指纹丢失问题。"
     echo -e "📌 生成结果汇总:${links_summary}"
     echo "=========================================================="
     read -p "按回车键返回主菜单..."
