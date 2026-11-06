@@ -1474,18 +1474,34 @@ _bbr_disable() {
     local sysctl_file="/etc/sysctl.d/99-bbr.conf"
     echo "----------------------------------------"
     echo "正在关闭 BBR 并清理配置..."
+    
+    # 1. 清理配置文件和自启模块
     [ -f "$sysctl_file" ] && rm -f "$sysctl_file"
     [ -f /etc/modules-load.d/bbr.conf ] && rm -f /etc/modules-load.d/bbr.conf
     sed -i '/tcp_bbr/d' /etc/modules 2>/dev/null
 
+    # 2. 写入 cubic 配置
     mkdir -p /etc/sysctl.d
     echo "net.ipv4.tcp_congestion_control=cubic" > "$sysctl_file"
+    
+    # 3. 实时修改内核参数（移除静默重定向，便于暴露潜在的系统限制错误）
+    echo "正在将内核拥塞控制切换为 cubic..."
+    if ! sysctl -w net.ipv4.tcp_congestion_control=cubic; then
+        echo "⚠️ 提示：实时修改内核参数失败，可能当前系统环境（如部分受限容器或特殊虚拟化VPS）不支持修改。"
+    fi
+
+    # 4. 重新加载系统 sysctl 配置
     sysctl --system >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1
     
-    echo "🔒 BBR 已关闭，当前已恢复为系统默认 cubic 算法。"
+    # 5. 严格校验关闭结果
+    if _bbr_check; then
+        echo "❌ 警告：BBR 关闭失败，当前内核状态仍为 bbr！"
+        echo "💡 提示：部分特殊内核（如强制编译启用的定制内核）可能无法直接在运行时关闭 BBR。"
+    else
+        echo "🔒 成功：BBR 已彻底关闭，当前已恢复为系统默认 cubic 算法。"
+    fi
     echo "----------------------------------------"
 }
-
 manage_bbr() {
     # 权限校验
     if [ $EUID -ne 0 ]; then
