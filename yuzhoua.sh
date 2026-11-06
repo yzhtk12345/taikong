@@ -768,7 +768,7 @@ EOT
 
 install_hy2_direct() {
     echo "=========================================================="
-    echo "正在部署 Hysteria 2 直连备用节点 (证书存放在 xray 目录下)..."
+    echo "正在部署 Hysteria 2 直连备用节点 (含正确的证书 pinSHA256 指纹)..."
     echo "=========================================================="
 
     local xray_dir="/opt/suoha_quick"
@@ -807,7 +807,7 @@ install_hy2_direct() {
     openssl ecparam -genkey -name prime256v1 -out "${xray_sub_dir}/hy2.key" 2>/dev/null
     openssl req -new -x509 -days 3650 -key "${xray_sub_dir}/hy2.key" -out "${xray_sub_dir}/hy2.crt" -subj "/CN=bing.com" 2>/dev/null
 
-    # 4. 提取自签证书的 SHA-256 指纹
+    # 4. 严格提取自签证书的 SHA-256 指纹（小写 hex 格式，供 hysteria2 链接与 clash 使用）
     local cert_pin=""
     if [ -f "${xray_sub_dir}/hy2.crt" ]; then
         cert_pin=$(openssl x509 -in "${xray_sub_dir}/hy2.crt" -noout -sha256 -fingerprint 2>/dev/null | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')
@@ -821,7 +821,7 @@ install_hy2_direct() {
         ip6tables -A INPUT -p udp --dport ${hy2_port} -j ACCEPT 2>/dev/null || true
     fi
 
-    # 6. 使用 Python 安全注入 Hysteria 2 入站配置（证书路径指向新位置）
+    # 6. 使用 Python 安全注入带 TLS 的 Hysteria 2 入站配置
     python3 -c "
 import json, sys
 
@@ -830,7 +830,6 @@ try:
     with open(cfg_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
     
-    # 移除已有的 hy2-direct，避免重复
     data['inbounds'] = [ib for ib in data.get('inbounds', []) if ib.get('tag') != 'hy2-direct']
     
     hy2_ib = {
@@ -879,7 +878,7 @@ except Exception as e:
     nohup /opt/suoha_quick/xray/xray run -config "$cfg_json" >/dev/null 2>&1 &
     echo $! > /opt/suoha_quick/xray.pid
 
-    # 7. 清理旧的 Hy2 节点后重新追加，并同步写入 clash.yaml
+    # 7. 清理旧的 Hy2 节点后重新追加，并同步写入带 pinSHA256 的 clash.yaml
     local work_nodes="${xray_dir}/nodes.txt"
     local clash_file="${xray_dir}/clash.yaml"
     
@@ -901,9 +900,10 @@ with open('$clash_file', 'w', encoding='utf-8') as f:
     local links_summary=""
     
     if [ -n "$ipv4" ]; then
+        # 严格使用标准 pinSHA256 参数，如果未获取到指纹则回退 insecure=1
         local query_param="alpn=h3"
         if [ -n "$cert_pin" ]; then
-            query_param="${query_param}&pin=${cert_pin}"
+            query_param="${query_param}&pinSHA256=${cert_pin}"
         else
             query_param="${query_param}&insecure=1"
         fi
@@ -922,7 +922,7 @@ with open('$clash_file', 'w', encoding='utf-8') as f:
     password: ${hy2_pass}
     alpn:
       - h3
-    skip-cert-verify: true
+    pinSHA256: ${cert_pin}
 EOT
         fi
     fi
@@ -930,7 +930,7 @@ EOT
     if [ -n "$ipv6" ]; then
         local query_param="alpn=h3"
         if [ -n "$cert_pin" ]; then
-            query_param="${query_param}&pin=${cert_pin}"
+            query_param="${query_param}&pinSHA256=${cert_pin}"
         else
             query_param="${query_param}&insecure=1"
         fi
@@ -949,7 +949,7 @@ EOT
     password: ${hy2_pass}
     alpn:
       - h3
-    skip-cert-verify: true
+    pinSHA256: ${cert_pin}
 EOT
         fi
     fi
@@ -973,7 +973,7 @@ EOT
     fi
 
     echo "=========================================================="
-    echo "✅ Hysteria 2 备用节点部署成功，证书已存放在 /opt/suoha_quick/xray/ 下！"
+    echo "✅ Hysteria 2 备用节点部署成功，已自动附加 `pinSHA256` 指纹校验！"
     echo -e "📌 生成结果汇总:${links_summary}"
     echo "=========================================================="
     read -p "按回车键返回主菜单..."
