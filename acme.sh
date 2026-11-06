@@ -208,7 +208,7 @@ if [[ ! $domainIP =~ $v4 ]] && [[ ! $domainIP =~ $v6 ]]; then
 yellow "当前VPS本地的IP：$vpsip"
 red "当前域名解析的IP与当前VPS本地的IP不匹配！！！"
 green "建议如下："
-if [[ "$v6" == "2a09"* \vert{}\vert{} "$v4" == "104.28"* ]]; then
+if [[ "$v6" == "2a09"* || "$v4" == "104.28"* ]]; then
 yellow "WARP未能自动关闭，请手动关闭！或者使用支持自动关闭与开启的甬哥WARP脚本"
 else
 yellow "1、请确保CDN小黄云关闭状态(仅限DNS)，其他域名解析网站设置同理"
@@ -243,7 +243,7 @@ else
 vpsip=$v4
 fi
 green "VPS本地的IP：$vpsip"
-if [[ "$v6" == "2a09"* \vert{}\vert{} "$v4" == "104.28"* ]]; then
+if [[ "$v6" == "2a09"* || "$v4" == "104.28"* ]]; then
 red "经检测，你申请了WARP的IP。请关闭WARP后再申请IP证书" && exit
 fi
 readp "请输入申请IP证书的IP【格式：IPV4或者IPV6或者IPV4 IPV6，回车跳过使用${vpsip%% *}】:" ym
