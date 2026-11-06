@@ -1086,12 +1086,8 @@ configure_warp_routing() {
         apt update && apt install -y curl gnupg lsb-release >/dev/null 2>&1
         mkdir -p /usr/share/keyrings
 
-        if ! curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o /usr/share/keyrings/cloudflare-warp-archive-keyring.asc; then
-            echo "[错误] 无法下载 Cloudflare GPG 密钥！"
-            read -p "按回车键返回主菜单..."
-            return
-        fi
-
+        curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o /usr/share/keyrings/cloudflare-warp-archive-keyring.asc
+        
         if [ ! -f "/usr/share/keyrings/cloudflare-warp-archive-keyring.asc" ]; then
             echo "[错误] GPG 密钥文件保存失败！"
             read -p "按回车键返回主菜单..."
@@ -1100,11 +1096,11 @@ configure_warp_routing() {
 
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.asc] https://pkg.cloudflareclient.com $(. /etc/os-release && echo $VERSION_CODENAME) main" | tee /etc/apt/sources.list.d/cloudflare-warp.list >/dev/null
         
-        if ! apt update || ! apt install -y cloudflare-warp; then
+        apt update && apt install -y cloudflare-warp || {
             echo "[错误] WARP 客户端包安装失败！"
             read -p "按回车键返回主菜单..."
             return
-        fi
+        }
     fi
 
     systemctl enable --now warp-svc >/dev/null 2>&1
@@ -1244,13 +1240,15 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
     done
 
     local start_script="${xray_dir}/start.sh"
-    if [ -f "$start_script" ] && ! grep -q "warp-cli connect" "$start_script"; then
-        cat >> "$start_script" << 'EOF_WARP'
+    if [ -f "$start_script" ]; then
+        if ! grep -q "warp-cli connect" "$start_script"; then
+            cat >> "$start_script" << 'EOF_WARP'
 
 # --- 自动恢复 WARP 代理服务 ---
 systemctl restart warp-svc >/dev/null 2>&1
 warp-cli connect >/dev/null 2>&1
 EOF_WARP
+        fi
     fi
 }
 
