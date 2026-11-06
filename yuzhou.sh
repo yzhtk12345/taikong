@@ -89,6 +89,19 @@ function get_or_create_sub_port(){
     echo "$port"
 }
 
+function get_or_create_sub_token(){
+    local token_file="/etc/suoha_sub_token"
+    local token=""
+    if [ -f "$token_file" ]; then
+        token=$(cat "$token_file" | tr -d '\n\r ')
+    fi
+    if [ -z "$token" ]; then
+        token="sub-$(cat /proc/sys/kernel/random/uuid | awk -F- '{print $1}')"
+        echo "$token" > "$token_file"
+    fi
+    echo "$token"
+}
+
 function start_sub_server(){
     local web_dir="$1"
     local port="$2"
@@ -369,7 +382,15 @@ if [ -z "$server_ip" ]; then
 fi
 
 sub_port=$(get_or_create_sub_port)
-sync_to_static_web "/opt/suoha_quick"
+sub_token=$(get_or_create_sub_token)
+
+# 将文件同步到带有随机 Token 的安全加密子目录中
+secure_web_dir="/var/www/suoha_sub/${sub_token}"
+mkdir -p "$secure_web_dir" >/dev/null 2>&1
+[ -f "/opt/suoha_quick/nodes.txt" ] && cp -f /opt/suoha_quick/nodes.txt "${secure_web_dir}/nodes.txt"
+[ -f "/opt/suoha_quick/sub.txt" ] && cp -f /opt/suoha_quick/sub.txt "${secure_web_dir}/sub.txt"
+[ -f "/opt/suoha_quick/clash.yaml" ] && cp -f /opt/suoha_quick/clash.yaml "${secure_web_dir}/clash.yaml"
+
 start_sub_server "/var/www/suoha_sub" "$sub_port"
 
 # ==================== 👇 完美修复版：固化变量并实现开机自动恢复 👇 ====================
@@ -432,9 +453,12 @@ if [[ -n "\$argo_vl" && -n "\$argo_tr" ]]; then
     base64 -w 0 nodes.txt > sub.txt 2>/dev/null || base64 nodes.txt | tr -d '\n' > sub.txt
     
     # 同步静态 Web 目录
-    mkdir -p /var/www/suoha_sub
-    cp -f sub.txt /var/www/suoha_sub/sub.txt
-    cp -f clash.yaml /var/www/suoha_sub/clash.yaml
+    # 同步到带安全 Token 的子目录（确保重启后 Token 和路径依然一致）
+    sub_token=\$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
+    secure_web_dir="/var/www/suoha_sub/\$sub_token"
+    mkdir -p "\$secure_web_dir"
+    cp -f sub.txt "\$secure_web_dir/sub.txt"
+    cp -f clash.yaml "\$secure_web_dir/clash.yaml"
 fi
 
 # 5. 确保开机时恢复 Python 订阅网页服务
@@ -468,8 +492,8 @@ systemctl enable suoha-quick.service >/dev/null 2>&1
 
 
 
-sub_online_url="http://${server_ip}:${sub_port}/sub.txt"
-clash_online_url="http://${server_ip}:${sub_port}/clash.yaml"
+sub_online_url="http://${server_ip}:${sub_port}/${sub_token}/sub.txt"
+clash_online_url="http://${server_ip}:${sub_port}/${sub_token}/clash.yaml"
 
 cat>v2ray.txt<<EOF
 ======================== 一键梭哈 443 TLS 节点列表 ========================
@@ -669,9 +693,21 @@ except Exception:
 
     sync_to_static_web "$xray_dir"
 
+    # 2. 在它下面紧接着加上这一段（同步到带 Token 的加密子目录）
+    if [ -f "/etc/suoha_sub_token" ]; then
+        local sub_token=$(cat /etc/suoha_sub_token 2>/dev/null)
+        local secure_web_dir="/var/www/suoha_sub/${sub_token}"
+        if [ -d "$secure_web_dir" ]; then
+            cp -f "${xray_dir}/sub.txt" "${secure_web_dir}/sub.txt" 2>/dev/null
+            cp -f "${xray_dir}/clash.yaml" "${secure_web_dir}/clash.yaml" 2>/dev/null
+            cp -f "${xray_dir}/nodes.txt" "${secure_web_dir}/nodes.txt" 2>/dev/null
+        fi
+    fi
+
     local sub_port=$(get_or_create_sub_port)
     local server_ip=$(get_server_ip)
-    local sub_online_url="http://${server_ip}:${sub_port}/sub.txt"
+    local sub_token=$(get_or_create_sub_token)
+    local sub_online_url="http://${server_ip}:${sub_port}/${sub_token}/sub.txt"
 
     clear
     echo "=========================================================="
