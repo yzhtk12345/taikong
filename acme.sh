@@ -58,7 +58,7 @@ elif [ -x "$(command -v dnf)" ]; then
 dnf update -y
 dnf install socat -y
 fi
-if [[ $release = Centos &&${vsid} =~ 8 ]]; then
+if [[ $release = Centos &&"${vsid}" =~ 8 ]]; then
 cd /etc/yum.repos.d/ && mkdir backup && mv *repo backup/ 
 curl -o /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-8.repo
 sed -i -e "s|mirrors.cloud.aliyuncs.com|mirrors.aliyun.com|g " /etc/yum.repos.d/CentOS-*
@@ -204,7 +204,7 @@ green "当前域名解析到的IPV6地址：$domainIP"
 else
 green "当前域名解析到的IPV4地址：$domainIP"
 fi
-if [[ ! $domainIP =~$v4 ]] && [[ ! $domainIP =~$v6 ]]; then
+if [[ ! $domainIP =~ $v4 ]] && [[ ! $domainIP =~ $v6 ]]; then
 yellow "当前VPS本地的IP：$vpsip"
 red "当前域名解析的IP与当前VPS本地的IP不匹配！！！"
 green "建议如下："
