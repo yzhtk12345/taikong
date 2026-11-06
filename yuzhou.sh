@@ -1069,6 +1069,238 @@ EOT
     read -p "按回车键返回主菜单..."
 }
 
+configure_warp_routing() {
+    local xray_dir="/opt/suoha_quick"
+    local cfg_json="/opt/suoha_quick/xray/config.json"
+    
+    if [ ! -f "$cfg_json" ]; then
+        echo "[错误] 未找到 Xray 配置文件: $cfg_json，请先运行梭哈模式！"
+        read -p "按回车键返回主菜单..."
+        return
+    fi
+
+    if ! command -v warp-cli &>/dev/null; then
+        echo "=========================================================="
+        echo "正在首次安装并配置 Cloudflare WARP 客户端..."
+        echo "=========================================================="
+        apt update && apt install -y curl gnupg lsb-release >/dev/null 2>&1
+        mkdir -p /usr/share/keyrings
+
+        if ! curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o /usr/share/keyrings/cloudflare-warp-archive-keyring.asc; then
+            echo "[错误] 无法下载 Cloudflare GPG 密钥！"
+            read -p "按回车键返回主菜单..."
+            return
+        fi
+
+        if [ ! -f "/usr/share/keyrings/cloudflare-warp-archive-keyring.asc" ]; then
+            echo "[错误] GPG 密钥文件保存失败！"
+            read -p "按回车键返回主菜单..."
+            return
+        fi
+
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.asc] https://pkg.cloudflareclient.com $(. /etc/os-release && echo $VERSION_CODENAME) main" | tee /etc/apt/sources.list.d/cloudflare-warp.list >/dev/null
+        
+        apt update && apt install -y cloudflare-warp || {
+            echo "[错误] WARP 客户端包安装失败！"
+            read -p "按回车键返回主菜单..."
+            return
+        }
+    fi
+
+    systemctl enable --now warp-svc >/dev/null 2>&1
+    warp-cli registration new >/dev/null 2>&1 || true
+    warp-cli mode proxy >/dev/null 2>&1
+    warp-cli proxy port 40000 >/dev/null 2>&1
+    warp-cli connect >/dev/null 2>&1
+
+    while true; do
+        clear
+        echo "=========================================================="
+        echo "        Cloudflare WARP 灵活路由与分流管理菜单"
+        echo "=========================================================="
+        echo "1. 自定义添加指定域名/应用走 WARP (交互式输入)"
+        echo "2. 切换为【全局模式】：所有外网流量强制走 WARP"
+        echo "3. 查看当前 WARP 路由状态"
+        echo "4. 关闭并停用 WARP 代理（恢复默认直连路由）"
+        echo "0. 返回上级主菜单"
+        echo "=========================================================="
+        read -p "请选择操作 [0-4]: " warp_choice
+
+        case "$warp_choice" in
+            1)
+                echo ""
+                echo "请输入需要走 WARP 的域名或关键字（多个域名请用空格隔开）"
+                echo "例如: openai.com chatgpt.com claude.ai t.me"
+                read -p "输入域名: " user_domains
+                
+                if [ -z "$user_domains" ]; then
+                    echo "输入为空，取消操作。"
+                    sleep 1
+                    continue
+                fi
+
+                python3 -c "
+import json
+cfg_file = '$cfg_json'
+with open(cfg_file, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+outbounds = data.get('outbounds', [])
+if not any(ob.get('tag') == 'warp-out' for ob in outbounds):
+    outbounds.append({
+        'tag': 'warp-out',
+        'protocol': 'socks',
+        'settings': {'servers': [{'address': '127.0.0.1', 'port': 40000}]}
+    })
+data['outbounds'] = outbounds
+
+routing = data.get('routing', {'domainStrategy': 'AsIs', 'rules': []})
+rules = routing.get('rules', [])
+
+custom_rule = None
+for r in rules:
+    if r.get('tag') == 'custom-warp-rule':
+        custom_rule = r
+        break
+
+new_domains = '$user_domains'.split()
+if not custom_rule:
+    custom_rule = {
+        'type': 'field',
+        'outboundTag': 'warp-out',
+        'domain': new_domains,
+        'tag': 'custom-warp-rule'
+    }
+    rules.insert(0, custom_rule)
+else:
+    existing_domains = custom_rule.get('domain', [])
+    for d in new_domains:
+        if d not in existing_domains:
+            existing_domains.append(d)
+    custom_rule['domain'] = existing_domains
+
+routing['rules'] = rules
+data['routing'] = routing
+
+with open(cfg_file, 'w', encoding='utf-8') as f:
+    json.dump(data, f, indent=4, ensure_ascii=False)
+"
+                pkill -f xray || true
+                nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
+                echo $! > "${xray_dir}/xray.pid"
+                echo "✅ 自定义域名规则已成功注入并生效！"
+                read -p "按回车键继续..."
+                ;;
+            2)
+                echo "正在切换为全局 WARP 模式..."
+                python3 -c "
+import json
+cfg_file = '$cfg_json'
+with open(cfg_file, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+outbounds = data.get('outbounds', [])
+if not any(ob.get('tag') == 'warp-out' for ob in outbounds):
+    outbounds.append({
+        'tag': 'warp-out',
+        'protocol': 'socks',
+        'settings': {'servers': [{'address': '127.0.0.1', 'port': 40000}]}
+    })
+data['outbounds'] = outbounds
+
+routing = {
+    'domainStrategy': 'AsIs',
+    'rules': [
+        { 'type': 'field', 'outboundTag': 'direct', 'ip': ['geoip:private', 'geoip:cn'] },
+        { 'type': 'field', 'outboundTag': 'direct', 'domain': ['geosite:cn'] },
+        { 'type': 'field', 'outboundTag': 'warp-out', 'network': 'tcp,udp' }
+    ]
+}
+data['routing'] = routing
+
+with open(cfg_file, 'w', encoding='utf-8') as f:
+    json.dump(data, f, indent=4, ensure_ascii=False)
+"
+                pkill -f xray || true
+                nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
+                echo $! > "${xray_dir}/xray.pid"
+                echo "✅ 已成功切换为【全局 WARP 模式】（国内直连，其余全走 WARP）！"
+                read -p "按回车键继续..."
+                ;;
+            3)
+                echo ""
+                echo "📊 当前 WARP 客户端状态："
+                warp-cli status
+                echo ""
+                read -p "按回车键继续..."
+                ;;
+            4)
+                echo "正在关闭 WARP 代理并彻底清理所有相关路由规则..."
+                warp-cli disconnect >/dev/null 2>&1 || true
+                systemctl stop warp-svc >/dev/null 2>&1 || true
+                
+                # 增强版彻底清理逻辑：只要 outboundTag 是 warp-out 或标签带 warp，全部抹除
+                python3 -c "
+import json
+cfg_file = '$cfg_json'
+try:
+    with open(cfg_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    # 1. 彻底清除 outbounds 中的 warp-out
+    if 'outbounds' in data:
+        data['outbounds'] = [ob for ob in data['outbounds'] if ob.get('tag') != 'warp-out']
+    
+    # 2. 彻底清除 routing 中所有与 warp 相关的规则
+    if 'routing' in data and 'rules' in data['routing']:
+        clean_rules = []
+        for r in data['routing']['rules']:
+            outbound_tag = r.get('outboundTag', '')
+            rule_tag = r.get('tag', '')
+            # 无论是自定义分流规则、全局兜底规则，只要 outboundTag 是 warp-out 或 tag 包含 warp，统统剔除
+            if outbound_tag == 'warp-out' or 'warp' in rule_tag.lower():
+                continue
+            clean_rules.append(r)
+        data['routing']['rules'] = clean_rules
+    
+    with open(cfg_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+    print('✅ 配置文件清理成功')
+except Exception as e:
+    print(f'Error: {e}')
+"
+                # 重启 Xray 核心
+                pkill -f xray || true
+                nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
+                echo $! > "${xray_dir}/xray.pid"
+
+                # 从 start.sh 移除自启恢复逻辑
+                local start_script="${xray_dir}/start.sh"
+                if [ -f "$start_script" ]; then
+                    python3 -c "
+with open('$start_script', 'r', encoding='utf-8') as f:
+    content = f.read()
+import re
+content = re.sub(r'# --- 自动恢复 WARP 代理服务 ---[\s\S]*?warp-cli connect >/dev/null 2>&1\n?', '', content)
+with open('$start_script', 'w', encoding='utf-8') as f:
+    f.write(content)
+" 2>/dev/null || true
+                fi
+
+                echo "✅ WARP 已成功关闭，Xray 路由已完全恢复为纯净直连状态！"
+                read -p "按回车键继续..."
+                ;;
+            0)
+                break
+                ;;
+            *)
+                echo "无效选项，请重新选择。"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 function installtunnel(){
 mkdir -p /opt/suoha/ >/dev/null 2>&1
 cd /opt/suoha
@@ -1607,6 +1839,7 @@ echo "3.卸载服务"
 echo "4.清空缓存"
 echo "5.额外增加ipv6 ss 共存部署"
 echo "6.额外增加 Hysteria 2 直连备用节点 (含 Clash 同步)"
+echo "7.配置 Cloudflare WARP 灵活路由与分流"
 echo -e "0.退出脚本\n"
 read -p "请选择模式(默认1):" mode
 if [ -z "$mode" ]
@@ -1708,6 +1941,9 @@ then
 elif [ $mode == 6 ]
 then
     install_hy2_direct
+elif [ $mode == 7 ]
+then
+    configure_warp_routing
 else
     echo "退出成功"
     exit
