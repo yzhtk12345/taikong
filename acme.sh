@@ -225,7 +225,7 @@ if [[ "${ym}" == *ip6.arpa* ]]; then
 red "目前不支持ip6.arpa域名申请证书" && exit
 fi
 nowca=`bash ~/.acme.sh/acme.sh --list | awk 'NR>1{print $1}' | tail -1`
-if [[ $nowca ==$ym ]]; then
+if [[ "$nowca" == "$ym" ]]; then
 red "经检测，输入的域名已有证书申请记录，不用重复申请"
 red "证书申请记录如下："
 bash ~/.acme.sh/acme.sh --list
