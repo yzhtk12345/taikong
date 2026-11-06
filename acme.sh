@@ -8,9 +8,8 @@ red(){ echo -e "\033[31m\033[01m$1\033[0m";}
 green(){ echo -e "\033[32m\033[01m$1\033[0m";}
 yellow(){ echo -e "\033[33m\033[01m$1\033[0m";}
 white(){ echo -e "\033[37m\033[01m$1\033[0m";}
-readp(){ read -p "$(yellow "$1")" $2;}
-[[ $EUID -ne 0 ]] && yellow "请以root模式运行脚本" && exit
-#[[ -e /etc/hosts ]] && grep -qE '^ *172.65.251.78 gitlab.com' /etc/hosts || echo -e '\n172.65.251.78 gitlab.com' >> /etc/hosts
+readp(){ read -p "$(yellow "$1")" $2;} [[$EUID -ne 0 ]] && yellow "请以root模式运行脚本" && exit
+
 if [[ -f /etc/redhat-release ]]; then
 release="Centos"
 elif cat /etc/issue | grep -q -E -i "alpine"; then
@@ -57,7 +56,7 @@ elif [ -x "$(command -v dnf)" ]; then
 dnf update -y
 dnf install socat -y
 fi
-if [[ $release = Centos && ${vsid} =~ 8 ]]; then
+if [[ $release = Centos &&${vsid} =~ 8 ]]; then
 cd /etc/yum.repos.d/ && mkdir backup && mv *repo backup/ 
 curl -o /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-8.repo
 sed -i -e "s|mirrors.cloud.aliyuncs.com|mirrors.aliyun.com|g " /etc/yum.repos.d/CentOS-*
@@ -65,7 +64,7 @@ sed -i -e "s|releasever|releasever-stream|g" /etc/yum.repos.d/CentOS-*
 yum clean all && yum makecache
 cd
 fi
-if [ -x "$(command -v yum)" ] || [ -x "$(command -v dnf)" ]; then
+if [ -x "$(command -v yum)" ] \vert{}\vert{} [ -x "$(command -v dnf)" ]; then
 if ! command -v "cronie" &> /dev/null; then
 if [ -x "$(command -v yum)" ]; then
 yum install -y cronie
@@ -116,6 +115,7 @@ green "80端口全释放完毕！"
 sleep 2
 fi
 }
+
 acme3(){
 readp "请输入注册所需的邮箱（回车跳过则自动生成虚拟gmail邮箱）：" Aemail
 if [ -z $Aemail ]; then
@@ -141,37 +141,21 @@ red "安装acme.sh证书申请程序失败" && exit
 fi
 }
 
+# 检查证书及生成状态（已全部指向 /opt/suoha_quick/）
 checktls(){
-if [[ -s /etc/sing-box/yuming/cert.crt && -s /etc/sing-box/yuming/private.key ]]; then
+if [[ -s /opt/suoha_quick/cert.crt && -s /opt/suoha_quick/private.key ]]; then
 cronac
-green "IP域名证书申请成功或已存在！域名证书（cert.crt）和密钥（private.key）已保存到 /etc/sing-box/yuming文件夹内" 
+green "IP域名证书申请成功或已存在！域名证书（cert.crt）和密钥（private.key）已保存到 /opt/suoha_quick 文件夹内" 
 yellow "公钥文件crt路径如下，可直接复制"
-green "/etc/sing-box/yuming/cert.crt"
+green "/opt/suoha_quick/cert.crt"
 yellow "密钥文件key路径如下，可直接复制"
-green "/etc/sing-box/yuming/private.key"
+green "/opt/suoha_quick/private.key"
 ym=`bash ~/.acme.sh/acme.sh --list | awk 'NR>1{print $1}' | tail -1`
-echo $ym > /etc/sing-box/yuming/ca.log
-if [[ -f '/etc/hysteria/config.json' ]]; then
-blue "检测到Hysteria-1代理协议，如果你安装了甬哥的Hysteria脚本，请在Hysteria脚本执行申请/变更证书，此证书将自动应用"
-fi
-if [[ -f '/etc/caddy/Caddyfile' ]]; then
-blue "检测到Naiveproxy代理协议，如果你安装了甬哥的Naiveproxy-yg脚本，请在Naiveproxy脚本执行申请/变更证书，此证书将自动应用"
-fi
-if [[ -f '/etc/tuic/tuic.json' ]]; then
-blue "检测到Tuic代理协议，如果你安装了甬哥的Tuic脚本，请在Tuic脚本执行申请/变更证书，此证书将自动应用"
-fi
-if [[ -f '/usr/bin/x-ui' ]]; then
-blue "检测到x-ui（xray代理协议），如果你安装了甬哥的x-ui-yg脚本，开启tls选项，此证书将自动应用"
-fi
-if [[ -f '/etc/s-box/sb.json' ]]; then
-blue "检测到Sing-box内核代理，如果你安装了甬哥的Sing-box-yg脚本，请在Sing-box脚本执行申请/变更证书，此证书将自动应用"
-fi
-if [[ -f "$HOME/agsbx/sb.json" ]]; then
-blue "检测到sing-box内核代理，如果你安装了甬哥的Argosbx小钢炮脚本，HY2/TUIC/AnyTLS/Naiveproxy四大协议将支持IP域名证书"
-fi
+echo $ym > /opt/suoha_quick/ca.log
 else
 bash ~/.acme.sh/acme.sh --uninstall >/dev/null 2>&1
-rm -rf /etc/sing-box/yuming
+# 安全清理：仅删除证书相关文件，不破坏 /opt/suoha_quick 目录下的其他服务文件
+rm -f /opt/suoha_quick/cert.crt /opt/suoha_quick/private.key /opt/suoha_quick/ca.log
 rm -rf ~/.acme.sh acme.sh
 uncronac
 red "遗憾，IP域名证书申请失败，建议如下："
@@ -185,19 +169,19 @@ fi
 }
 
 installCA(){
-bash ~/.acme.sh/acme.sh --install-cert -d ${ym} --key-file /etc/sing-box/yuming/private.key --fullchain-file /etc/sing-box/yuming/cert.crt --ecc
+bash ~/.acme.sh/acme.sh --install-cert -d ${ym} --key-file /opt/suoha_quick/private.key --fullchain-file /opt/suoha_quick/cert.crt --ecc
 }
 
 checkip(){
 v4v6
 if [[ -z $v4 ]]; then
 vpsip=$v6
-elif [[ -n $v4 && -n $v6 ]]; then
+elif [[ -n $v4 && -n$v6 ]]; then
 vpsip="$v6 或者 $v4"
 else
 vpsip=$v4
 fi
-domainIP=$(dig @8.8.8.8 +time=2 +short "$ym" 2>/dev/null | grep -m1 '^[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+$')
+domainIP=$(dig @8.8.8.8 +time=2 +short "$ym" 2>/dev/null \vert{} grep -m1 '^[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+$')
 if echo $domainIP | grep -q "network unreachable\|timed out" || [[ -z $domainIP ]]; then
 domainIP=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$ym" 2>/dev/null | grep -m1 ':')
 fi
@@ -213,16 +197,16 @@ readp "请输入域名解析的IP，与VPS本地IP($vpsip)保持一致：" domai
 else
 exit
 fi
-elif [[ -n $(echo $domainIP | grep ":") ]]; then
+elif [[ -n $(echo$domainIP | grep ":") ]]; then
 green "当前域名解析到的IPV6地址：$domainIP"
 else
 green "当前域名解析到的IPV4地址：$domainIP"
 fi
-if [[ ! $domainIP =~ $v4 ]] && [[ ! $domainIP =~ $v6 ]]; then
+if [[ ! $domainIP =~$v4 ]] && [[ ! $domainIP =~$v6 ]]; then
 yellow "当前VPS本地的IP：$vpsip"
 red "当前域名解析的IP与当前VPS本地的IP不匹配！！！"
 green "建议如下："
-if [[ "$v6" == "2a09"* || "$v4" == "104.28"* ]]; then
+if [[ "$v6" == "2a09"* \vert{}\vert{} "$v4" == "104.28"* ]]; then
 yellow "WARP未能自动关闭，请手动关闭！或者使用支持自动关闭与开启的甬哥WARP脚本"
 else
 yellow "1、请确保CDN小黄云关闭状态(仅限DNS)，其他域名解析网站设置同理"
@@ -239,7 +223,7 @@ if [[ "${ym}" == *ip6.arpa* ]]; then
 red "目前不支持ip6.arpa域名申请证书" && exit
 fi
 nowca=`bash ~/.acme.sh/acme.sh --list | awk 'NR>1{print $1}' | tail -1`
-if [[ $nowca == $ym ]]; then
+if [[ $nowca ==$ym ]]; then
 red "经检测，输入的域名已有证书申请记录，不用重复申请"
 red "证书申请记录如下："
 bash ~/.acme.sh/acme.sh --list
@@ -251,13 +235,13 @@ ACMEstandaloneIP(){
 v4v6
 if [[ -z $v4 ]]; then
 vpsip=$v6
-elif [[ -n $v4 && -n $v6 ]]; then
+elif [[ -n $v4 && -n$v6 ]]; then
 vpsip="$v4 或者 $v6"
 else
 vpsip=$v4
 fi
 green "VPS本地的IP：$vpsip"
-if [[ "$v6" == "2a09"* || "$v4" == "104.28"* ]]; then
+if [[ "$v6" == "2a09"* \vert{}\vert{} "$v4" == "104.28"* ]]; then
 red "经检测，你申请了WARP的IP。请关闭WARP后再申请IP证书" && exit
 fi
 readp "请输入申请IP证书的IP【格式：IPV4或者IPV6或者IPV4 IPV6，回车跳过使用${vpsip%% *}】:" ym
@@ -265,31 +249,27 @@ if [[ -z $ym ]]; then
 ym=${vpsip%% *}
 fi
 checkacmeca
-ip1=$(echo $ym | awk '{print $1}')
+ip1=$(echo$ym | awk '{print $1}')
 if [[ "$ym" == *" "* && "$ym" == *":"* ]]; then
-ip2=$(echo $ym | awk '{print $2}')
+ip2=$(echo$ym | awk '{print $2}')
 bash ~/.acme.sh/acme.sh --issue -d "$ip1" -d "$ip2" --standalone -k ec-256 --server letsencrypt --cert-profile shortlived --days 3 --insecure
 else
 bash ~/.acme.sh/acme.sh --issue -d "$ym" --standalone -k ec-256 --server letsencrypt --cert-profile shortlived --days 3 --insecure
 fi
-bash ~/.acme.sh/acme.sh --install-cert -d "$ip1" --key-file /etc/sing-box/yuming/private.key --fullchain-file /etc/sing-box/yuming/cert.crt --ecc
+bash ~/.acme.sh/acme.sh --install-cert -d "$ip1" --key-file /opt/suoha_quick/private.key --fullchain-file /opt/suoha_quick/cert.crt --ecc
 checktls
 }
 
 ACMEstandaloneDNS(){
 v4v6
-#vpsip=${v4:-$v6}
 readp "请输入解析完成的域名:" ym
-#if [ -z "$ym" ]; then
-#case "$vpsip" in *:*) ym="${vpsip//:/-}.nip.io" ;; *) ym="${vpsip//./-}.nip.io" ;; esac
-#fi
 green "已输入的域名:$ym" && sleep 1
 checkacmeca
 checkip
-if [[ $domainIP = $v4 ]]; then
+if [[ $domainIP =$v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue -d ${ym} --standalone -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP = $v6 ]]; then
+if [[ $domainIP =$v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue -d ${ym} --standalone -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 installCA
@@ -300,7 +280,7 @@ ACMEDNS(){
 readp "请输入解析完成的域名:" ym
 green "已输入的域名:$ym" && sleep 1
 checkacmeca
-if [[ -n $(echo $ym | grep \*) ]]; then
+if [[ -n $(echo$ym | grep \*) ]]; then
 green "经检测，当前为泛域名证书申请，" && sleep 2
 else
 green "经检测，当前为单域名证书申请，" && sleep 2
@@ -311,17 +291,6 @@ echo
 ab="请选择托管域名解析服务商：\n1.Cloudflare\n2.腾讯云DNSPod\n3.阿里云Aliyun\n 请选择："
 readp "$ab" cd
 case "$cd" in 
-#1 )
-#readp "请复制Cloudflare的Global API Key：" GAK
-#export CF_Key="$GAK"
-#readp "请输入登录Cloudflare的注册邮箱地址：" CFemail
-#export CF_Email="$CFemail"
-#if [[ $domainIP = $v4 ]]; then
-#bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${ym} -k ec-256 --server letsencrypt --insecure
-#fi
-#if [[ $domainIP = $v6 ]]; then
-#bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
-#fi
 1 )
 yellow "请选择 Cloudflare DNS API 验证方式："
 yellow "1. API Token (推荐)"
@@ -338,10 +307,10 @@ else
     readp "请复制Cloudflare的Global API Key：" GAK
     export CF_Key="$GAK"
 fi
-if [[ $domainIP = $v4 ]]; then
+if [[ $domainIP =$v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP = $v6 ]]; then
+if [[ $domainIP =$v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 ;;
@@ -350,10 +319,10 @@ readp "请复制腾讯云DNSPod的DP_Id：" DPID
 export DP_Id="$DPID"
 readp "请复制腾讯云DNSPod的DP_Key：" DPKEY
 export DP_Key="$DPKEY"
-if [[ $domainIP = $v4 ]]; then
+if [[ $domainIP =$v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_dp -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP = $v6 ]]; then
+if [[ $domainIP =$v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_dp -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 ;;
@@ -362,10 +331,10 @@ readp "请复制阿里云Aliyun的Ali_Key：" ALKEY
 export Ali_Key="$ALKEY"
 readp "请复制阿里云Aliyun的Ali_Secret：" ALSER
 export Ali_Secret="$ALSER"
-if [[ $domainIP = $v4 ]]; then
+if [[ $domainIP =$v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_ali -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP = $v6 ]]; then
+if [[ $domainIP =$v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_ali -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 esac
@@ -376,7 +345,7 @@ checktls
 ACMEDNScheck(){
 wgcfv6=$(curl -s6m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
 wgcfv4=$(curl -s4m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
-if [[ ! $wgcfv4 =~ on|plus && ! $wgcfv6 =~ on|plus ]]; then
+if [[ ! $wgcfv4 =~ on\vert{}plus && !$wgcfv6 =~ on|plus ]]; then
 ACMEDNS
 else
 systemctl stop wg-quick@wgcf >/dev/null 2>&1
@@ -392,7 +361,7 @@ fi
 ACMEstandaloneDNScheck(){
 wgcfv6=$(curl -s6m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
 wgcfv4=$(curl -s4m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
-if [[ ! $wgcfv4 =~ on|plus && ! $wgcfv6 =~ on|plus ]]; then
+if [[ ! $wgcfv4 =~ on\vert{}plus && !$wgcfv6 =~ on|plus ]]; then
 ACMEstandaloneDNS
 else
 systemctl stop wg-quick@wgcf >/dev/null 2>&1
@@ -408,7 +377,7 @@ fi
 ACMEstandaloneIPcheck(){
 wgcfv6=$(curl -s6m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
 wgcfv4=$(curl -s4m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
-if [[ ! $wgcfv4 =~ on|plus && ! $wgcfv6 =~ on|plus ]]; then
+if [[ ! $wgcfv4 =~ on\vert{}plus && !$wgcfv6 =~ on|plus ]]; then
 ACMEstandaloneIP
 else
 systemctl stop wg-quick@wgcf >/dev/null 2>&1
@@ -422,7 +391,7 @@ fi
 }
 
 acme(){
-mkdir -p /etc/sing-box/yuming
+mkdir -p /opt/suoha_quick
 ab="1.选择独立80端口模式申请IP证书（无需域名，小白推荐）\n2.选择独立80端口模式申请域名证书（需域名）\n3.选择DNS API模式申请证书（需域名、ID、Key），自动识别单域名与泛域名\n 请选择："
 readp "$ab" cd
 case "$cd" in 
@@ -434,23 +403,15 @@ esac
 
 Certificate(){
 [[ -z $(~/.acme.sh/acme.sh -v 2>/dev/null) ]] && yellow "未安装acme.sh证书申请，无法执行" && exit 
-green "Main_Domainc下显示的域名就是已申请成功的域名证书，Renew下显示对应域名证书的自动续期时间点"
+green "Main_Domain下显示的域名就是已申请成功的域名证书，Renew下显示对应域名证书的自动续期时间点"
 bash ~/.acme.sh/acme.sh --list
-#readp "请输入要撤销并删除的域名证书（复制Main_Domain下显示的域名，退出请按Ctrl+c）:" ym
-#if [[ -n $(bash ~/.acme.sh/acme.sh --list | grep $ym) ]]; then
-#bash ~/.acme.sh/acme.sh --revoke -d ${ym} --ecc
-#bash ~/.acme.sh/acme.sh --remove -d ${ym} --ecc
-#rm -rf /etc/sing-box/yuming
-#green "撤销并删除${ym}域名证书成功"
-#else
-#red "未找到你输入的${ym}域名证书，请自行核实！" && exit
-#fi
 }
 
+# 证书状态检测逻辑（检查 /opt/suoha_quick/ 下的文件是否真实存在且非空）
 acmeshow(){
 if [[ -n $(~/.acme.sh/acme.sh -v 2>/dev/null) ]]; then
 caacme1=`bash ~/.acme.sh/acme.sh --list | awk 'NR>1{print $1}' | tail -1`
-if [[ -n $caacme1 && ! $caacme1 == "Main_Domain" ]] && [[ -f /etc/sing-box/yuming/cert.crt && -f /etc/sing-box/yuming/private.key && -s /etc/sing-box/yuming/cert.crt && -s /etc/sing-box/yuming/private.key ]]; then
+if [[ -n $caacme1 && !$caacme1 == "Main_Domain" ]] && [[ -f /opt/suoha_quick/cert.crt && -f /opt/suoha_quick/private.key && -s /opt/suoha_quick/cert.crt && -s /opt/suoha_quick/private.key ]]; then
 caacme=$caacme1
 else
 caacme='无证书申请记录'
@@ -459,6 +420,7 @@ else
 caacme='未安装acme'
 fi
 }
+
 cronac(){
 uncronac
 crontab -l > /tmp/crontab.tmp
@@ -466,42 +428,30 @@ echo "0 0 * * * bash ~/.acme.sh/acme.sh --cron >/dev/null 2>&1" >> /tmp/crontab.
 crontab /tmp/crontab.tmp
 rm /tmp/crontab.tmp
 }
+
 uncronac(){
 crontab -l > /tmp/crontab.tmp
 sed -i '/--cron/d' /tmp/crontab.tmp
 crontab /tmp/crontab.tmp
 rm /tmp/crontab.tmp
 }
+
 acmerenew(){
 [[ -z $(~/.acme.sh/acme.sh -v 2>/dev/null) ]] && yellow "未安装acme.sh证书申请，无法执行" && exit 
 green "以下显示的域名就是已申请成功的主证书"
 bash ~/.acme.sh/acme.sh --list | awk 'NR>1{print $1}' | tail -1
 echo
-#ab="1.无脑一键续期所有证书（推荐）\n2.选择指定的域名证书续期\n0.返回上一层\n 请选择："
-#readp "$ab" cd
-#case "$cd" in 
-#1 ) 
 green "开始续期证书…………" && sleep 3
 bash ~/.acme.sh/acme.sh --cron -f
 checktls
-#;;
-#2 ) 
-#readp "请输入要续期的域名证书（复制Main_Domain下显示的域名）:" ym
-#if [[ -n $(bash ~/.acme.sh/acme.sh --list | grep $ym) ]]; then
-#bash ~/.acme.sh/acme.sh --renew -d ${ym} --force --ecc
-#checktls
-#else
-#red "未找到你输入的${ym}域名证书，请自行核实！" && exit
-#fi
-#;;
-#0 ) start_menu;;
-#esac
 }
+
 uninstall(){
 [[ -z $(~/.acme.sh/acme.sh -v 2>/dev/null) ]] && yellow "未安装acme.sh证书申请，无法执行" && exit 
 curl https://get.acme.sh | sh
 bash ~/.acme.sh/acme.sh --uninstall
-rm -rf /etc/sing-box/yuming
+# 安全清理：卸载时仅移除证书文件，不影响同目录下的其他核心组件
+rm -f /opt/suoha_quick/cert.crt /opt/suoha_quick/private.key /opt/suoha_quick/ca.log
 rm -rf ~/.acme.sh acme.sh
 sed -i '/acme.sh.env/d' ~/.bashrc 
 source ~/.bashrc
@@ -528,8 +478,8 @@ yellow "1、SSH登录的IP与VPS本地IP必须一致"
 yellow "2、80端口模式仅支持单域名证书申请，在80端口不被占用的情况下支持自动续期"
 yellow "3、DNS API模式不支持freenom免费域名申请，支持单域名与泛域名证书申请，无条件自动续期"
 yellow "4、泛域名申请前须在服务商解析处设置一个名称为 * 字符的解析记录 (输入格式：*.一级或者二级主域)"
-yellow "公钥文件crt保存路径：/etc/sing-box/yuming/cert.crt"
-yellow "密钥文件key保存路径：/etc/sing-box/yuming/private.key"
+yellow "公钥文件crt保存路径：/opt/suoha_quick/cert.crt"
+yellow "密钥文件key保存路径：/opt/suoha_quick/private.key"
 echo
 red "========================================================================="
 acmeshow
