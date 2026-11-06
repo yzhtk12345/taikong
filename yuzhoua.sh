@@ -768,11 +768,17 @@ EOT
 
 install_hy2_direct() {
     echo "=========================================================="
-    echo "正在智能检测 VPS 网络栈并部署 Hysteria 2 直连备用节点 (含 Clash 同步)..."
+    echo "正在智能检测网络栈并部署 Hysteria 2 直连备用节点..."
     echo "=========================================================="
 
     local xray_dir="/opt/suoha_quick"
-    cd "$xray_dir" 2>/dev/null || mkdir -p "$xray_dir" && cd "$xray_dir"
+    local cfg_json="/opt/suoha_quick/xray/config.json"
+    
+    if [ ! -f "$cfg_json" ]; then
+        echo "[错误] 未找到 Xray 配置文件: $cfg_json，请先运行梭哈模式！"
+        read -p "按回车键返回主菜单..."
+        return
+    fi
 
     # 1. 智能检测 IPv4 和 IPv6 地址
     local ipv4=""
@@ -792,7 +798,7 @@ install_hy2_direct() {
     echo "--------------------------------------------------"
 
     # 2. 生成随机 UDP 端口和统一密码
-    local hy2_port=$(shuf -i 10000-65535 -n 1)
+    local hy2_port=$((RANDOM % 10000 + 10000))
     local hy2_pass=$(cat /proc/sys/kernel/random/uuid)
 
     # 3. 生成自签 TLS 证书供 Hysteria 2 / HTTP/3 使用
@@ -808,46 +814,94 @@ install_hy2_direct() {
         ip6tables -A INPUT -p udp --dport ${hy2_port} -j ACCEPT 2>/dev/null || true
     fi
 
-    # 5. 注入 Xray 配置（监听 0.0.0.0，双栈流量均可进入同一个端口）
-    if command -v jq &> /dev/null && [ -f "config.json" ]; then
-        jq --argjson port "$hy2_port" --arg pass "$hy2_pass" '.inbounds += [{
-            "tag": "hy2-direct",
-            "listen": "0.0.0.0",
-            "port": $port,
-            "protocol": "hysteria",
-            "settings": {
-                "version": 2,
-                "clients": [{"auth": $pass}]
-            },
-            "streamSettings": {
-                "network": "hysteria",
-                "security": "tls",
-                "hysteriaSettings": {"version": 2},
-                "tlsSettings": {
-                    "alpn": ["h3"],
-                    "certificates": [{
-                        "certificateFile": "/etc/xray/hy2.crt",
-                        "keyFile": "/etc/xray/hy2.key"
-                    }]
-                }
+    # 5. 使用 Python 安全注入 Hysteria 2 入站配置到正确的 config.json 中
+    python3 -c "
+import json, sys
+
+cfg_file = '$cfg_json'
+try:
+    with open(cfg_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    # 移除已有的 hy2-direct，避免重复
+    data['inbounds'] = [ib for ib in data.get('inbounds', []) if ib.get('tag') != 'hy2-direct']
+    
+    hy2_ib = {
+        'tag': 'hy2-direct',
+        'listen': '0.0.0.0',
+        'port': int('$hy2_port'),
+        'protocol': 'hysteria',
+        'settings': {
+            'version': 2,
+            'clients': [{'auth': '$hy2_pass'}]
+        },
+        'streamSettings': {
+            'network': 'hysteria',
+            'security': 'tls',
+            'hysteriaSettings': {'version': 2},
+            'tlsSettings': {
+                'alpn': ['h3'],
+                'certificates': [{
+                    'certificateFile': '/etc/xray/hy2.crt',
+                    'keyFile': '/etc/xray/hy2.key'
+                }]
             }
-        }]' config.json > config.json.tmp && mv config.json.tmp config.json
-        
-        systemctl restart xray 2>/dev/null || true
-    else
-        echo "[警告] 未检测到 jq 或 config.json，Xray 入站请手动检查！"
+        }
+    }
+    data['inbounds'].append(hy2_ib)
+    
+    with open(cfg_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+except Exception as e:
+    print(f'Error: {e}')
+    sys.exit(1)
+"
+    if [ $? -ne 0 ]; then
+        echo "[错误] 写入 Xray 配置文件失败！"
+        read -p "按回车键返回主菜单..."
+        return
     fi
 
-    # 6. 根据双栈检测结果动态生成链接并写入 nodes.txt 与 clash.yaml
+    # 精准重启 Xray 进程
+    if [ -f "/opt/suoha_quick/xray.pid" ]; then
+        kill -9 $(cat /opt/suoha_quick/xray.pid) >/dev/null 2>&1
+        rm -f /opt/suoha_quick/xray.pid
+    else
+        kill -9 $(pgrep -f "/opt/suoha_quick/xray/xray") >/dev/null 2>&1
+    fi
+    nohup /opt/suoha_quick/xray/xray run -config "$cfg_json" >/dev/null 2>&1 &
+    echo $! > /opt/suoha_quick/xray.pid
+
+    # 6. 清理旧的 Hy2 节点后重新追加，并同步写入 clash.yaml
+    local work_nodes="${xray_dir}/nodes.txt"
+    local clash_file="${xray_dir}/clash.yaml"
+    
+    touch "$work_nodes"
+    sed -i '/Hy2-v4-Backup/d' "$work_nodes"
+    sed -i '/Hy2-v6-Backup/d' "$work_nodes"
+
+    # 清理 clash.yaml 中旧的 Hy2 节点块
+    if [ -f "$clash_file" ]; then
+        python3 -c "
+with open('$clash_file', 'r', encoding='utf-8') as f:
+    content = f.read()
+# 简单移除旧的 hy2 块（如果存在）
+import re
+content = re.sub(r'\n\s*-\s*name:\s*\"Hy2-v[46]-Backup\"[\s\S]*?(?=\n\s*-\s*name:|\nproxy-groups:|\Z)', '', content)
+with open('$clash_file', 'w', encoding='utf-8') as f:
+    f.write(content)
+" 2>/dev/null || true
+    fi
+
     local links_summary=""
     
     if [ -n "$ipv4" ]; then
         local hy2_link_v4="hysteria2://${hy2_pass}@${ipv4}:${hy2_port}?alpn=h3&insecure=1#Hy2-v4-Backup"
-        echo "$hy2_link_v4" >> nodes.txt
+        echo "$hy2_link_v4" >> "$work_nodes"
         links_summary="${links_summary}\n   👉 IPv4 备用节点: ${hy2_link_v4}"
 
-        if [ -f "clash.yaml" ]; then
-            cat >> clash.yaml << EOT
+        if [ -f "$clash_file" ]; then
+            cat >> "$clash_file" << EOT
 
   - name: "Hy2-v4-Backup"
     type: hysteria2
@@ -863,11 +917,11 @@ EOT
 
     if [ -n "$ipv6" ]; then
         local hy2_link_v6="hysteria2://${hy2_pass}@[${ipv6}]:${hy2_port}?alpn=h3&insecure=1#Hy2-v6-Backup"
-        echo "$hy2_link_v6" >> nodes.txt
+        echo "$hy2_link_v6" >> "$work_nodes"
         links_summary="${links_summary}\n   👉 IPv6 备用节点: ${hy2_link_v6}"
 
-        if [ -f "clash.yaml" ]; then
-            cat >> clash.yaml << EOT
+        if [ -f "$clash_file" ]; then
+            cat >> "$clash_file" << EOT
 
   - name: "Hy2-v6-Backup"
     type: hysteria2
@@ -883,11 +937,12 @@ EOT
 
     # 7. 重新生成 Base64 订阅并同步到安全 Token 目录
     if [ $(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}') == "Alpine" ]; then
-        base64 nodes.txt | tr -d '\n' > "${xray_dir}/sub.txt"
+        base64 "$work_nodes" | tr -d '\n' > "${xray_dir}/sub.txt"
     else
-        base64 -w 0 nodes.txt > "${xray_dir}/sub.txt"
+        base64 -w 0 "$work_nodes" > "${xray_dir}/sub.txt"
     fi
 
+    sync_to_static_web "$xray_dir"
     if [ -f "/etc/suoha_sub_token" ]; then
         local sub_token=$(cat /etc/suoha_sub_token 2>/dev/null)
         local secure_web_dir="/var/www/suoha_sub/${sub_token}"
@@ -898,61 +953,11 @@ EOT
         fi
     fi
 
-    # 8. 将智能检测及 Clash 同步逻辑持久化写入开机自启脚本 start.sh
-    if [ -f "/opt/suoha_quick/start.sh" ]; then
-        if ! grep -q "Hy2-v4-Backup" /opt/suoha_quick/start.sh && ! grep -q "Hy2-v6-Backup" /opt/suoha_quick/start.sh; then
-            cat >> /opt/suoha_quick/start.sh << EOT
-
-# --- 自动恢复 Hysteria 2 直连备用节点 (含 Clash 同步) ---
-hy2_port="${hy2_port}"
-hy2_pass="${hy2_pass}"
-v4="\$(curl -4 -s --connect-timeout 2 ip.sb || ip -4 addr show scope global 2>/dev/null | grep inet | awk '{print \$2}' | cut -d/ -f1 | head -n1)"
-v6="\$(curl -6 -s --connect-timeout 2 ip.sb || ip -6 addr show scope global 2>/dev/null | grep inet6 | grep -v 'host' | awk '{print \$2}' | cut -d/ -f1 | head -n1)"
-
-if [ -n "\$v4" ]; then
-    echo "hysteria2://\${hy2_pass}@\${v4}:\${hy2_port}?alpn=h3&insecure=1#Hy2-v4-Backup" >> nodes.txt
-    cat >> clash.yaml << 'EOF_YAML'
-
-  - name: "Hy2-v4-Backup"
-    type: hysteria2
-    server: \${v4}
-    port: \${hy2_port}
-    password: \${hy2_pass}
-    alpn: ["h3"]
-    skip-cert-verify: true
-EOF_YAML
-fi
-
-if [ -n "\$v6" ]; then
-    echo "hysteria2://\${hy2_pass}@[\${v6}]:\${hy2_port}?alpn=h3&insecure=1#Hy2-v6-Backup" >> nodes.txt
-    cat >> clash.yaml << 'EOF_YAML'
-
-  - name: "Hy2-v6-Backup"
-    type: hysteria2
-    server: \${v6}
-    port: \${hy2_port}
-    password: \${hy2_pass}
-    alpn: ["h3"]
-    skip-cert-verify: true
-EOF_YAML
-fi
-
-# 重新生成 Base64 订阅并同步到安全 Token 目录
-base64 -w 0 nodes.txt > sub.txt 2>/dev/null || base64 nodes.txt | tr -d '\\n' > sub.txt
-sub_token=\$(cat /etc/suoha_sub_token 2>/dev/null || echo "sub-default")
-secure_web_dir="/var/www/suoha_sub/\$sub_token"
-mkdir -p "\$secure_web_dir"
-cp -f sub.txt "\$secure_web_dir/sub.txt"
-cp -f clash.yaml "\$secure_web_dir/clash.yaml"
-cp -f nodes.txt "\$secure_web_dir/nodes.txt"
-EOT
-        fi
-    fi
-
     echo "=========================================================="
-    echo "✅ Hysteria 2 备用节点及 Clash 配置部署完毕！"
+    echo "✅ Hysteria 2 备用节点注入成功并已生效！"
     echo -e "📌 生成结果汇总:${links_summary}"
     echo "=========================================================="
+    read -p "按回车键返回主菜单..."
 }
 
 function installtunnel(){
