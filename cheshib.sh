@@ -161,7 +161,7 @@ show_menu() {
     echo -e " 📂 脚本主目录   : ${GREEN}${YUZHOU_DIR}${NC}"
     echo -e " 📁 当前脚本位置 : ${GREEN}${SCRIPT_PATH}${NC}"
     echo -e "${CYAN}--------------------------------------------------------------${NC}"
-    echo -e " 1. 加固 VPS 主机系统 (修改端口/用户/禁用Root)"
+    echo -e " 1. 加固 VPS 主机系统 (修改端口/用户/禁用Root/安装防火墙)"
     echo -e " 2. 梭哈模式 (自动生成 VLESS + Trojan 443 优选节点)"
     echo -e " 3. 安装服务 (自定义域名绑定固定 Argo 隧道)"
     echo -e " 4. 卸载服务与清理"
