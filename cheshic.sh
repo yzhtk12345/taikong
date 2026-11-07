@@ -243,7 +243,7 @@ while true; do
             read -p "按回车返回..."
             ;;
         10)
-            echo "正在执行第 10 项: 绑定域名 (acme)..."
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/acme.sh)
             read -p "按回车返回..."
             ;;
         0)
