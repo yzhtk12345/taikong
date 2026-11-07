@@ -184,7 +184,7 @@ while true; do
 
     case "$choice" in
         1)
-            echo "正在执行第 1 项: 加固 VPS 主机..."
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/linux_anquan.sh)
             read -p "按回车返回..."
             ;;
         2)
