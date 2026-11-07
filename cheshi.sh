@@ -207,7 +207,7 @@ while true; do
             read -p "按回车返回..."
             ;;
         6)
-            echo "正在执行第 6 项: IPv6 SS 部署..."
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/ss_jiedian.sh)
             read -p "按回车返回..."
             ;;
         7)
