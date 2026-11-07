@@ -189,7 +189,7 @@ action_init_security() {
     read -p "按回车键返回主菜单..." < /dev/tty
 }
 
-# 快速梭哈模式 (已完整恢复默认Argo + 优选域名 及 VLESS + Trojan 全部 6 个节点)
+# 快速梭哈模式 (完整 6 个节点逻辑：默认Argo + 优选域名，含 VLESS 与 Trojan)
 function quicktunnel(){
 mkdir -p /opt/kkk_quick >/dev/null 2>&1
 cd /opt/kkk_quick
@@ -374,7 +374,7 @@ rm -rf xray cloudflared-linux xray.zip
 
 
 # ==============================================================================
-# 4. 额外功能模块 (6. IPv6 SS, 7. Hy2, 8. WARP分流, 9. BBR加速)
+# 4. 额外功能模块 (6. IPv6 SS, 7. Hy2双栈, 8. WARP分流, 9. BBR加速)
 # ==============================================================================
 
 # 6. 额外增加 IPv6 Shadowsocks 直连节点
@@ -450,9 +450,9 @@ with open('$cfg_json', 'w', encoding='utf-8') as f:
     read -p "按回车键返回主菜单..." < /dev/tty
 }
 
-# 7. 额外增加 Hysteria 2 直连备用节点
+# 7. 额外增加 Hysteria 2 直连备用节点 (已恢复原版的 IPv4 + IPv6 双栈节点生成逻辑)
 install_hy2_direct() {
-    echo "正在部署 Hysteria 2 直连备用节点..."
+    echo "正在部署 Hysteria 2 直连备用节点 (IPv4 & IPv6 双栈)..."
     local xray_dir="/opt/kkk_quick"
     local cfg_json="/opt/kkk_quick/xray/config.json"
     
@@ -462,7 +462,8 @@ install_hy2_direct() {
         return
     fi
 
-    local ipv4=$(curl -4 -s --connect-timeout 3 ip.sb)
+    local ipv4=$(get_server_ip)
+    local ipv6=$(get_server_ipv6)
     local hy2_port=$((RANDOM % 10000 + 10000))
     local hy2_pass=$(cat /proc/sys/kernel/random/uuid)
 
@@ -478,7 +479,7 @@ with open('$cfg_json', 'r', encoding='utf-8') as f:
 data['inbounds'] = [ib for ib in data.get('inbounds', []) if ib.get('tag') != 'hy2-direct']
 data['inbounds'].append({
     'tag': 'hy2-direct',
-    'listen': '0.0.0.0',
+    'listen': '::',
     'port': int('$hy2_port'),
     'protocol': 'hysteria',
     'settings': {'version': 2, 'clients': [{'auth': '$hy2_pass'}]},
@@ -498,22 +499,34 @@ with open('$cfg_json', 'w', encoding='utf-8') as f:
     pkill -f xray
     nohup /opt/kkk_quick/xray/xray run -config "$cfg_json" >/dev/null 2>&1 &
     
-    local hy2_link="hysteria2://${hy2_pass}@${ipv4}:${hy2_port}?alpn=h3&pinSHA256=${cert_pin}#Hy2-v4-Backup"
-    echo "$hy2_link" >> "${xray_dir}/nodes.txt"
+    clear
+    echo "=========================================================="
+    echo "            Hysteria 2 双栈节点部署成功！              "
+    echo "=========================================================="
+
+    if [ -n "$ipv4" ]; then
+        local hy2_v4_link="hysteria2://${hy2_pass}@${ipv4}:${hy2_port}?alpn=h3&pinSHA256=${cert_pin}#Hy2-v4-Backup"
+        echo "$hy2_v4_link" >> "${xray_dir}/nodes.txt"
+        echo "IPv4 节点链接:"
+        echo "$hy2_v4_link"
+        echo "----------------------------------------------------------"
+    fi
+
+    if [ -n "$ipv6" ]; then
+        local hy2_v6_link="hysteria2://${hy2_pass}@[${ipv6}]:${hy2_port}?alpn=h3&pinSHA256=${cert_pin}#Hy2-v6-Backup"
+        echo "$hy2_v6_link" >> "${xray_dir}/nodes.txt"
+        echo "IPv6 节点链接:"
+        echo "$hy2_v6_link"
+        echo "----------------------------------------------------------"
+    fi
+
     sync_to_static_web "$xray_dir"
 
     local sub_port=$(get_or_create_sub_port)
     local sub_token=$(get_or_create_sub_token)
     local server_ip=$(get_server_ip)
 
-    clear
-    echo "=========================================================="
-    echo "            Hysteria 2 节点部署成功！              "
-    echo "=========================================================="
-    echo "新增节点链接:"
-    echo "$hy2_link"
-    echo "----------------------------------------------------------"
-    echo "✅ 订阅文件已自动更新！"
+    echo "✅ 订阅文件已自动更新！包含新增的 IPv4/IPv6 Hy2 节点。"
     echo "订阅地址: http://${server_ip}:${sub_port}/${sub_token}/sub.txt"
     echo "=========================================================="
     read -p "按回车键返回主菜单..." < /dev/tty
