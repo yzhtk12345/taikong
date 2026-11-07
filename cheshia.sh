@@ -1226,80 +1226,91 @@ manage_bbr() {
 
 
 # ==============================================================================
-# 5. 主菜单入口及模式分发逻辑
+# 5. 主菜单入口及循环分发逻辑
 # ==============================================================================
-clear
-echo "=========================================================="
-echo "         yuzhou 多协议代理节点快捷部署与管理工具(梭哈改)              "
-echo "=========================================================="
-echo "==本脚本改编至梭哈脚本，加入作者通过ai加入了自己需要的的功能。=="
-echo "1. 加固 VPS 主机系统"
-echo "2. 梭哈模式 (自动生成 VLESS + Trojan 443 TLS 优选节点)"
-echo "3. 安装服务 (自定义域名绑定固定 Argo 隧道)"
-echo "4. 卸载服务"
-echo "5. 清空缓存"
-echo "6. 额外增加 IPv6 SS 共存部署"
-echo "7. 额外增加 Hysteria 2 直连备用节点"
-echo "8. 配置 Cloudflare WARP 灵活路由与分流"
-echo "9. 开启 BBR 加速"
-echo "10.绑定域名"
-echo "0. 退出脚本"
-echo "=========================================================="
-read -p "请选择运行模式 (默认1): " mode
-[ -z "$mode" ] && mode=1
+while true; do
+    clear
+    echo "=========================================================="
+    echo "         yuzhou 多协议代理节点快捷部署与管理工具(梭哈改)              "
+    echo "=========================================================="
+    echo "==本脚本改编至梭哈脚本，加入作者通过ai加入了自己需要的的功能。=="
+    echo "1. 加固 VPS 主机系统"
+    echo "2. 梭哈模式 (自动生成 VLESS + Trojan 443 TLS 优选节点)"
+    echo "3. 安装服务 (自定义域名绑定固定 Argo 隧道)"
+    echo "4. 卸载服务"
+    echo "5. 清空缓存"
+    echo "6. 额外增加 IPv6 SS 共存部署"
+    echo "7. 额外增加 Hysteria 2 直连备用节点"
+    echo "8. 配置 Cloudflare WARP 灵活路由与分流"
+    echo "9. 开启 BBR 加速"
+    echo "10.绑定域名"
+    echo "0. 退出脚本"
+    echo "=========================================================="
+    read -p "请选择运行模式 (默认1): " mode
+    [ -z "$mode" ] && mode=1
 
-case "$mode" in
-    1)
-        action_init_security
-        ;;
-    2)
-        read -p "请选择 Argo 连接模式 IPv4 或 IPv6 (输入 4 或 6，默认 4): " ips
-        [ -z "$ips" ] && ips=4
-        isp=$(curl -$ips -s --connect-timeout 2 https://speed.cloudflare.com/meta 2>/dev/null | awk -F\" '{print $26"-"$18"-"$30}' | sed -e 's/ /_/g')
-        pkill -f xray >/dev/null 2>&1
-        pkill -f cloudflared-linux >/dev/null 2>&1
-        quicktunnel
-        ;;
-    3)
-        read -p "请选择 Argo 连接模式 IPv4 或 IPv6 (输入 4 或 6，默认 4): " ips
-        [ -z "$ips" ] && ips=4
-        isp=$(curl -$ips -s --connect-timeout 2 https://speed.cloudflare.com/meta 2>/dev/null | awk -F\" '{print $26"-"$18"-"$30}' | sed -e 's/ /_/g')
-        installtunnel
-        cat /opt/kkk/v2ray.txt
-        echo "服务安装完成，日常管理请运行命令: kkk"
-        ;;
-    4)
-        systemctl stop cloudflared.service xray.service kkk-quick.service 2>/dev/null || true
-        systemctl disable cloudflared.service xray.service kkk-quick.service 2>/dev/null || true
-        pkill -f "http.server" >/dev/null 2>&1
-        rm -rf /opt/kkk /opt/kkk_quick /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /lib/systemd/system/kkk-quick.service /usr/bin/kkk ~/.cloudflared /etc/kkk_sub_port /etc/kkk_sub_token /var/www/kkk_sub
-        systemctl --system daemon-reload
-        echo "所有服务与缓存已彻底卸载清理完成！"
-        ;;
-    5)
-        pkill -f xray >/dev/null 2>&1
-        pkill -f cloudflared-linux >/dev/null 2>&1
-        pkill -f "http.server" >/dev/null 2>&1
-        rm -rf /opt/kkk_quick/nodes.txt /opt/kkk_quick/sub.txt /opt/kkk_quick/clash.yaml
-        echo "缓存已清空！"
-        ;;
-    6)
-        install_ipv6_ss
-        ;;
-    7)
-        install_hy2_direct
-        ;;
-    8)
-        configure_warp_routing
-        ;;
-    9)
-        manage_bbr
-        ;;
-    10)
-        bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/acme.sh)
-        ;;  
-    *)
-        echo "已成功退出脚本。"
-        exit 0
-        ;;
-esac
+    case "$mode" in
+        1)
+            action_init_security
+            ;;
+        2)
+            read -p "请选择 Argo 连接模式 IPv4 或 IPv6 (输入 4 或 6，默认 4): " ips
+            [ -z "$ips" ] && ips=4
+            isp=$(curl -$ips -s --connect-timeout 2 https://speed.cloudflare.com/meta 2>/dev/null | awk -F\" '{print $26"-"$18"-"$30}' | sed -e 's/ /_/g')
+            pkill -f xray >/dev/null 2>&1
+            pkill -f cloudflared-linux >/dev/null 2>&1
+            quicktunnel
+            read -p "按回车键返回主菜单..." < /dev/tty
+            ;;
+        3)
+            read -p "请选择 Argo 连接模式 IPv4 或 IPv6 (输入 4 或 6，默认 4): " ips
+            [ -z "$ips" ] && ips=4
+            isp=$(curl -$ips -s --connect-timeout 2 https://speed.cloudflare.com/meta 2>/dev/null | awk -F\" '{print $26"-"$18"-"$30}' | sed -e 's/ /_/g')
+            installtunnel
+            cat /opt/kkk/v2ray.txt
+            echo "服务安装完成，日常管理请运行命令: kkk"
+            read -p "按回车键返回主菜单..." < /dev/tty
+            ;;
+        4)
+            systemctl stop cloudflared.service xray.service kkk-quick.service 2>/dev/null || true
+            systemctl disable cloudflared.service xray.service kkk-quick.service 2>/dev/null || true
+            pkill -f "http.server" >/dev/null 2>&1
+            rm -rf /opt/kkk /opt/kkk_quick /lib/systemd/system/cloudflared.service /lib/systemd/system/xray.service /lib/systemd/system/kkk-quick.service /usr/bin/kkk ~/.cloudflared /etc/kkk_sub_port /etc/kkk_sub_token /var/www/kkk_sub
+            systemctl --system daemon-reload
+            echo "所有服务与缓存已彻底卸载清理完成！"
+            read -p "按回车键返回主菜单..." < /dev/tty
+            ;;
+        5)
+            pkill -f xray >/dev/null 2>&1
+            pkill -f cloudflared-linux >/dev/null 2>&1
+            pkill -f "http.server" >/dev/null 2>&1
+            rm -rf /opt/kkk_quick/nodes.txt /opt/kkk_quick/sub.txt /opt/kkk_quick/clash.yaml
+            echo "缓存已清空！"
+            read -p "按回车键返回主菜单..." < /dev/tty
+            ;;
+        6)
+            install_ipv6_ss
+            ;;
+        7)
+            install_hy2_direct
+            ;;
+        8)
+            configure_warp_routing
+            ;;
+        9)
+            manage_bbr
+            ;;
+        10)
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/acme.sh)
+            read -p "按回车键返回主菜单..." < /dev/tty
+            ;;  
+        0)
+            echo "已成功退出脚本。"
+            exit 0
+            ;;
+        *)
+            echo "已成功退出脚本。"
+            exit 0
+            ;;
+    esac
+done
