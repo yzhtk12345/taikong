@@ -15,10 +15,13 @@ NC="\033[0m"
 _uninstall_all() {
     echo -e "${YELLOW}正在停止并清理所有相关服务与文件...${NC}"
     
-    if [ $(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}') == "Alpine" ]
+    os_name=$(grep -i PRETTY_NAME /etc/os-release 2>/dev/null | cut -d '"' -f2 | awk '{print $1}')
+    if [ "$os_name" == "Alpine" ]
     then
-        kill -9 $(ps -ef | grep xray | grep -v grep | awk '{print $1}') >/dev/null 2>&1
-        kill -9 $(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $1}') >/dev/null 2>&1
+        pids_xray=$(ps -ef | grep xray | grep -v grep | awk '{print $1}')
+        [ -n "$pids_xray" ] && kill -9 $pids_xray >/dev/null 2>&1
+        pids_cf=$(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $1}')
+        [ -n "$pids_cf" ] && kill -9 $pids_cf >/dev/null 2>&1
         pkill -f "http.server" >/dev/null 2>&1
         rm -rf /opt/suoha /opt/suoha_quick /etc/yuzhou /etc/local.d/cloudflared.start /etc/local.d/xray.start /usr/bin/suoha /etc/suoha_sub_port /var/www/suoha_sub
     else
@@ -26,8 +29,11 @@ _uninstall_all() {
         systemctl stop xray.service >/dev/null 2>&1
         systemctl disable cloudflared.service >/dev/null 2>&1
         systemctl disable xray.service >/dev/null 2>&1
-        kill -9 $(ps -ef | grep xray | grep -v grep | awk '{print $2}') >/dev/null 2>&1
-        kill -9 $(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $2}') >/dev/null 2>&1
+        
+        pids_xray=$(ps -ef | grep xray | grep -v grep | awk '{print $2}')
+        [ -n "$pids_xray" ] && kill -9 $pids_xray >/dev/null 2>&1
+        pids_cf=$(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $2}')
+        [ -n "$pids_cf" ] && kill -9 $pids_cf >/dev/null 2>&1
         pkill -f "http.server" >/dev/null 2>&1
         
         # 核心路径更新：包含 /etc/yuzhou
@@ -43,7 +49,7 @@ _uninstall_all() {
 
 # 卸载管理菜单
 manage_uninstall() {
-    if [ $EUID -ne 0 ]; then
+    if [ "$EUID" -ne 0 ]; then
        echo -e "${RED}❌ 错误：请使用 root 权限运行此功能！${NC}"
        return 1
     fi
@@ -81,4 +87,4 @@ manage_uninstall() {
 }
 
 manage_uninstall
-```[cite: 9]
+```[cite: 14]
