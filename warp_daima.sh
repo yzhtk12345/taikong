@@ -45,7 +45,7 @@ if ! command -v warp-cli &>/dev/null; then
     mkdir -p /usr/share/keyrings
 
     if ! curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o /usr/share/keyrings/cloudflare-warp-archive-keyring.asc; then
-        echo -e "${RED}[错误] 无法下载 Cloudflare GPG 密钥！${NC}"
+        echo -e "${RED}[错误] 不能下载 Cloudflare GPG 密钥！${NC}"
         read -p "按回车键返回..." < /dev/tty
         exit 1
     fi
@@ -79,7 +79,7 @@ warp-cli accept-tos >/dev/null 2>&1 || true
 warp-cli mode proxy >/dev/null 2>&1
 warp-cli tunnel ip set-dual-stack >/dev/null 2>&1 || true
 
-# 3. 动态随机生成本地 SOCKS 端口并检查占用（若存在旧端口则清理）
+# 3. 动态随机生成本地 SOCKS 端口并检查占用
 while true; do
     warp_local_port=$((RANDOM % 20000 + 30000))
     if ! ss -tlnp | grep -q ":${warp_local_port} " && ! ss -ulnp | grep -q ":${warp_local_port} "; then
@@ -87,7 +87,6 @@ while true; do
     fi
 done
 
-# 设置 warp-cli 本地代理端口并连接
 warp-cli proxy port "$warp_local_port" >/dev/null 2>&1
 warp-cli connect >/dev/null 2>&1
 sleep 2
@@ -128,12 +127,11 @@ cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
-# 确保保留原有的 inbounds，绝对不覆盖删除节点入站
 if 'inbounds' not in data:
     data['inbounds'] = []
 
 outbounds = data.get('outbounds', [])
-outbounds = [ob for ob in outbounds if ob.get('tag') != 'warp-out']
+outbounds = [ob for ob in outbounds if ob.get('tag') not in ['warp-out', 'direct']]
 outbounds.append({
     'tag': 'warp-out',
     'protocol': 'socks',
@@ -141,9 +139,7 @@ outbounds.append({
         'servers': [{'address': '127.0.0.1', 'port': int('${warp_local_port}')}]
     }
 })
-# 确保存在 freedom 直连出站
-if not any(ob.get('protocol') == 'freedom' for ob in outbounds):
-    outbounds.append({'protocol': 'freedom', 'settings': {}})
+outbounds.append({'tag': 'direct', 'protocol': 'freedom', 'settings': {}})
 data['outbounds'] = outbounds
 
 routing = data.get('routing', {'domainStrategy': 'IPIfNonMatch', 'rules': []})
@@ -192,12 +188,11 @@ cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
-# 确保保留原有的 inbounds，绝对不覆盖删除节点入站
 if 'inbounds' not in data:
     data['inbounds'] = []
 
 outbounds = data.get('outbounds', [])
-outbounds = [ob for ob in outbounds if ob.get('tag') != 'warp-out']
+outbounds = [ob for ob in outbounds if ob.get('tag') not in ['warp-out', 'direct']]
 outbounds.append({
     'tag': 'warp-out',
     'protocol': 'socks',
@@ -205,14 +200,14 @@ outbounds.append({
         'servers': [{'address': '127.0.0.1', 'port': int('${warp_local_port}')}]
     }
 })
-if not any(ob.get('protocol') == 'freedom' for ob in outbounds):
-    outbounds.append({'protocol': 'freedom', 'settings': {}})
+outbounds.append({'tag': 'direct', 'protocol': 'freedom', 'settings': {}})
 data['outbounds'] = outbounds
 
+# 修复全局模式路由：确保定义了直连 tag 并安全分流
 routing = {
     'domainStrategy': 'IPIfNonMatch',
     'rules': [
-        { 'type': 'field', 'outboundTag': 'direct', 'ip': ['geoip:private', 'geoip:cn'] },
+        { 'type': 'field', 'outboundTag': 'direct', 'ip': ['127.0.0.0/8', '::1/128', 'geoip:private', 'geoip:cn'] },
         { 'type': 'field', 'outboundTag': 'direct', 'domain': ['geosite:cn'] },
         { 'type': 'field', 'outboundTag': 'warp-out', 'network': 'tcp,udp' }
     ]
@@ -250,7 +245,9 @@ try:
         data = json.load(f)
     
     if 'outbounds' in data:
-        data['outbounds'] = [ob for ob in data['outbounds'] if ob.get('tag'] != 'warp-out']
+        data['outbounds'] = [ob for ob in data['outbounds'] if ob.get('tag') not in ['warp-out', 'direct']]
+        if not any(ob.get('protocol') == 'freedom' for ob in data['outbounds']):
+            data['outbounds'].append({'protocol': 'freedom', 'settings': {}})
     
     if 'routing' in data and 'rules' in data['routing']:
         clean_rules = []
