@@ -124,7 +124,7 @@ function sync_to_static_web(){
 
 
 # ==============================================================================
-# 3. 核心节点部署与安全配置模块 (已恢复主机名随机生成)
+# 3. 核心节点部署与安全配置模块
 # ==============================================================================
 
 action_init_security() {
@@ -132,7 +132,6 @@ action_init_security() {
     echo "  开始执行：系统初始化与安全加固"
     echo "===================================="
     
-    # 恢复主机名随机生成支持
     local current_hostname=$(hostname)
     local random_host="vps-$(tr -dc 'a-z0-9' < /dev/urandom | head -c 4)"
     
@@ -190,7 +189,7 @@ action_init_security() {
     read -p "按回车键返回主菜单..." < /dev/tty
 }
 
-# 快速梭哈模式
+# 快速梭哈模式 (已完整恢复默认Argo + 优选域名 及 VLESS + Trojan 全部 6 个节点)
 function quicktunnel(){
 mkdir -p /opt/kkk_quick >/dev/null 2>&1
 cd /opt/kkk_quick
@@ -277,9 +276,13 @@ proxies:
 EOF
 
 proxy_names=()
-for idx in "${!opt_domains[@]}"; do
-    d="${opt_domains[$idx]}"
-    l="${opt_labels[$idx]}"
+vless_domains=("$argo_vl" "${opt_domains[@]}")
+vless_labels=("默认Argo" "${opt_labels[@]}")
+
+# 完整生成 VLESS 节点 (默认Argo + 优选域名)
+for idx in "${!vless_domains[@]}"; do
+    d="${vless_domains[$idx]}"
+    l="${vless_labels[$idx]}"
     echo "vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_vl}&type=ws&host=${argo_vl}&path=%2F${urlpath_vless}#${node_tag}-VLESS-${l}-443" >> nodes.txt
     proxy_names+=("${node_tag}-VLESS-${l}-443")
     cat>>clash.yaml<<EOF
@@ -300,6 +303,47 @@ for idx in "${!opt_domains[@]}"; do
 EOF
 done
 
+trojan_domains=("$argo_tr" "${opt_domains[@]}")
+trojan_labels=("默认Argo" "${opt_labels[@]}")
+
+# 完整生成 Trojan 节点 (默认Argo + 优选域名)
+for idx in "${!trojan_domains[@]}"; do
+    d="${trojan_domains[$idx]}"
+    l="${trojan_labels[$idx]}"
+    echo "trojan://${uuid}@${d}:443?security=tls&sni=${argo_tr}&type=ws&host=${argo_tr}&path=%2F${urlpath_trojan}#${node_tag}-Trojan-${l}-443" >> nodes.txt
+    proxy_names+=("${node_tag}-Trojan-${l}-443")
+    cat>>clash.yaml<<EOF
+  - name: "${node_tag}-Trojan-${l}-443"
+    type: trojan
+    server: ${d}
+    port: 443
+    password: ${uuid}
+    udp: true
+    sni: ${argo_tr}
+    network: ws
+    ws-opts:
+      path: /${urlpath_trojan}
+      headers:
+        Host: ${argo_tr}
+EOF
+done
+
+cat>>clash.yaml<<EOF
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+EOF
+
+for pname in "${proxy_names[@]}"; do
+    echo "      - \"${pname}\"" >> clash.yaml
+done
+
+cat>>clash.yaml<<EOF
+rules:
+  - MATCH,PROXY
+EOF
+
 sub_port=$(get_or_create_sub_port)
 sub_token=$(get_or_create_sub_token)
 sync_to_static_web "/opt/kkk_quick"
@@ -312,7 +356,7 @@ sub_online_url="http://${server_ip}:${sub_port}/${sub_token}/sub.txt"
 clash_online_url="http://${server_ip}:${sub_port}/${sub_token}/clash.yaml"
 
 echo -e "=========================================================="
-echo " 梭哈模式部署成功！节点与订阅信息如下："
+echo " 梭哈模式部署成功！所有 6 个节点与订阅信息如下："
 echo "=========================================================="
 echo "通用订阅链接: ${sub_online_url}"
 echo "v2rayN导入:   sub://${sub_online_url}"
