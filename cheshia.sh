@@ -1,4 +1,3 @@
-cat << 'EOF' > /etc/yuzhou/cheshi.sh
 #!/bin/bash
 
 # ==================== 目录及基础配置 ====================
@@ -234,5 +233,3 @@ while true; do
             ;;
     esac
 done
-EOF
-chmod +x /etc/yuzhou/cheshi.sh
