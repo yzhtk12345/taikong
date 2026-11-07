@@ -1,9 +1,12 @@
 #!/bin/bash
 
-# 定义主目录
+# ==================== 目录及基础配置 ====================
 YUZHOU_DIR="/etc/yuzhou"
 MODULES_DIR="${YUZHOU_DIR}/modules"
 mkdir -p "$MODULES_DIR"
+
+# 获取当前脚本的绝对路径
+SCRIPT_PATH="$(realpath "$0" 2>/dev/null || echo "$0")"
 
 # 颜色定义
 RED="\033[31m"
@@ -14,13 +17,35 @@ NC="\033[0m"
 
 # ==================== 环境检测函数 ====================
 check_system_info() {
-    # 1. CPU 与架构
+    # 1. CPU 型号与核心数
     cpu_model=$(awk -F': ' '/model name/ {print $2; exit}' /proc/cpuinfo 2>/dev/null || echo "未知 CPU")
-    arch=$(uname -m)
     cores=$(nproc 2>/dev/null || echo "1")
     
-    # 2. IP 四项细分检测 (本地v4, 本地v6, WARP出站v4, WARP出站v6)
-    # 本地 IPv4
+    # 2. CPU 架构与 x86-64 v几代检测
+    arch=$(uname -m)
+    x86_v_level="非 x86_64 架构"
+    if [ "$arch" = "x86_64" ]; then
+        has_v2=0; has_v3=0; has_v4=0
+        grep -q "cx16" /proc/cpuinfo && grep -q "lahf_lm" /proc/cpuinfo && grep -q "popcnt" /proc/cpuinfo && grep -q "sse4_1" /proc/cpuinfo && grep -q "sse4_2" /proc/cpuinfo && grep -q "ssse3" /proc/cpuinfo && has_v2=1
+        if [ $has_v2 -eq 1 ]; then
+            grep -q "avx" /proc/cpuinfo && grep -q "avx2" /proc/cpuinfo && grep -q "bmi1" /proc/cpuinfo && grep -q "bmi2" /proc/cpuinfo && grep -q "f16c" /proc/cpuinfo && grep -q "fma" /proc/cpuinfo && grep -q "abm" /proc/cpuinfo && grep -q "movbe" /proc/cpuinfo && grep -q "xsave" /proc/cpuinfo && has_v3=1
+        fi
+        if [ $has_v3 -eq 1 ]; then
+            grep -q "avx512f" /proc/cpuinfo && grep -q "avx512bw" /proc/cpuinfo && grep -q "avx512cd" /proc/cpuinfo && grep -q "avx512dq" /proc/cpuinfo && grep -q "avx512vl" /proc/cpuinfo && has_v4=1
+        fi
+
+        if [ $has_v4 -eq 1 ]; then
+            x86_v_level="x86-64-v4 (AVX-512)"
+        elif [ $has_v3 -eq 1 ]; then
+            x86_v_level="x86-64-v3 (AVX2)"
+        elif [ $has_v2 -eq 1 ]; then
+            x86_v_level="x86-64-v2 (SSE4.2)"
+        else
+            x86_v_level="x86-64-v1 (基础版)"
+        fi
+    fi
+
+    # 3. IP 四项细分检测 (本地v4, 本地v6, WARP出站v4, WARP出站v6)
     local_v4=$(curl -s4 --connect-timeout 2 https://api.ip.sb 2>/dev/null)
     if [ -n "$local_v4" ]; then
         local_v4_status="${GREEN}${local_v4}${NC}"
@@ -28,7 +53,6 @@ check_system_info() {
         local_v4_status="${RED}无 (未检测到本地IPv4)${NC}"
     fi
 
-    # 本地 IPv6
     local_v6=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
     if [ -n "$local_v6" ]; then
         local_v6_status="${GREEN}${local_v6}${NC}"
@@ -36,7 +60,6 @@ check_system_info() {
         local_v6_status="${YELLOW}无 (未检测到本地IPv6)${NC}"
     fi
 
-    # WARP 出站 IPv4 (通过 Cloudflare Trace 或专用接口检查)
     warp_v4=$(curl -s4 --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
     if [ -n "$warp_v4" ]; then
         warp_v4_ip=$(curl -s4 --connect-timeout 2 https://api.ip.sb 2>/dev/null)
@@ -45,7 +68,6 @@ check_system_info() {
         warp_v4_status="${YELLOW}未连接/未启用${NC}"
     fi
 
-    # WARP 出站 IPv6
     warp_v6=$(curl -s6 --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
     if [ -n "$warp_v6" ]; then
         warp_v6_ip=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
@@ -54,7 +76,7 @@ check_system_info() {
         warp_v6_status="${YELLOW}未连接/未启用${NC}"
     fi
 
-    # 3. BBR 状态检测
+    # 4. BBR 状态检测
     bbr_result=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}')
     if [ "$bbr_result" = "bbr" ]; then
         bbr_status="${GREEN}已开启 (BBR)${NC}"
@@ -62,7 +84,7 @@ check_system_info() {
         bbr_status="${YELLOW}未开启 ($bbr_result)${NC}"
     fi
 
-    # 4. Xray 状态、版本及路径检测
+    # 5. Xray 状态、版本及路径检测
     xray_path=""
     xray_ver=""
     if [ -f "/opt/suoha/xray/xray" ]; then
@@ -80,7 +102,7 @@ check_system_info() {
         xray_status="${RED}未安装${NC}"
     fi
 
-    # 5. WARP 服务运行状态检测
+    # 6. WARP 客户端运行状态检测
     if command -v warp-cli &>/dev/null && systemctl is-active --quiet warp-svc 2>/dev/null; then
         warp_svc_status="${GREEN}已安装并运行${NC}"
     elif command -v warp-cli &>/dev/null; then
@@ -89,15 +111,13 @@ check_system_info() {
         warp_svc_status="${RED}未安装${NC}"
     fi
 
-    # 6. 域名与 Argo 分开检测
-    # 域名检测 (检查是否存在 acme 或自定义域名配置文件)
+    # 7. 域名与 Argo 独立检测
     if [ -f "/root/.acme.sh/acme.sh" ] || [ -d "/etc/yuzhou/domain" ]; then
         domain_check_status="${GREEN}已配置/绑定域名${NC}"
     else
         domain_check_status="${YELLOW}未绑定自定义域名${NC}"
     fi
 
-    # Argo 隧道检测 (检查 .cloudflared 授权缓存)
     if [ -f "/root/.cloudflared/cert.pem" ] || [ -d "/root/.cloudflared" ] && [ "$(ls -A /root/.cloudflared 2>/dev/null)" ]; then
         argo_check_status="${GREEN}已授权/有Argo缓存${NC}"
     else
@@ -113,7 +133,9 @@ show_menu() {
     echo -e "${CYAN}==============================================================${NC}"
     echo -e "${CYAN}        yuzhou的vps快捷xray脚本 (主控菜单)                  ${NC}"
     echo -e "${CYAN}==============================================================${NC}"
-    echo -e " 🖥️  CPU 芯片     : $cpu_model ($cores 核心 / 架构: $arch)"
+    echo -e " 🖥️  CPU 型号     : $cpu_model"
+    echo -e " ⚙️  CPU 核心数   : $cores 核心"
+    echo -e " 🏗️  CPU 架构     : $arch ($x86_v_level)"
     echo -e " 🌐 本地 IPv4   : $local_v4_status"
     echo -e " 🌐 本地 IPv6   : $local_v6_status"
     echo -e " 🛡️  WARP 出站v4 : $warp_v4_status"
@@ -123,6 +145,8 @@ show_menu() {
     echo -e " ☁️  WARP 客户端 : $warp_svc_status"
     echo -e " 🏷️  域名状态    : $domain_check_status"
     echo -e " 🚇 Argo 状态   : $argo_check_status"
+    echo -e " 📂 脚本主目录   : ${GREEN}${YUZHOU_DIR}${NC}"
+    echo -e " 📁 当前脚本位置 : ${GREEN}${SCRIPT_PATH}${NC}"
     echo -e "${CYAN}--------------------------------------------------------------${NC}"
     echo -e " 1. 加固 VPS 主机系统 (修改端口/用户/禁用Root)"
     echo -e " 2. 梭哈模式 (自动生成 VLESS + Trojan 443 优选节点)"
@@ -148,43 +172,43 @@ while true; do
     case "$choice" in
         1)
             echo "正在执行第 1 项: 加固 VPS 主机..."
-            read -p "按回车键返回主菜单..."
+            read -p "按回车返回..."
             ;;
         2)
             echo "正在执行第 2 项: 梭哈模式..."
-            read -p "按回车键返回主菜单..."
+            read -p "按回车返回..."
             ;;
         3)
             echo "正在执行第 3 项: 安装固定 Argo 服务..."
-            read -p "按回车键返回主菜单..."
+            read -p "按回车返回..."
             ;;
         4)
             echo "正在执行第 4 项: 卸载服务..."
-            read -p "按回车键返回主菜单..."
+            read -p "按回车返回..."
             ;;
         5)
             echo "正在执行第 5 项: 清空缓存..."
-            read -p "按回车键返回主菜单..."
+            read -p "按回车返回..."
             ;;
         6)
             echo "正在执行第 6 项: IPv6 SS 部署..."
-            read -p "按回车键返回主菜单..."
+            read -p "按回车返回..."
             ;;
         7)
             echo "正在执行第 7 项: Hysteria 2 部署..."
-            read -p "按回车键返回主菜单..."
+            read -p "按回车返回..."
             ;;
         8)
             echo "正在执行第 8 项: WARP 路由分流..."
-            read -p "按回车键返回主菜单..."
+            read -p "按回车返回..."
             ;;
         9)
             echo "正在执行第 9 项: BBR 管理..."
-            read -p "按回车键返回主菜单..."
+            read -p "按回车返回..."
             ;;
         10)
             echo "正在执行第 10 项: 绑定域名 (acme)..."
-            read -p "按回车键返回主菜单..."
+            read -p "按回车返回..."
             ;;
         0)
             echo -e "${GREEN}已成功退出脚本。${NC}"
