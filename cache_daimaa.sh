@@ -17,11 +17,15 @@ _clear_cache() {
     
     os_name=$(grep -i PRETTY_NAME /etc/os-release 2>/dev/null | cut -d '"' -f2 | awk '{print $1}')
     if [ "$os_name" == "Alpine" ]; then
-        kill -9 $(ps -ef | grep xray | grep -v grep | awk '{print $1}') >/dev/null 2>&1
-        kill -9 $(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $1}') >/dev/null 2>&1
+        pids_xray=$(ps -ef | grep xray | grep -v grep | awk '{print $1}')
+        [ -n "$pids_xray" ] && kill -9 $pids_xray >/dev/null 2>&1
+        pids_cf=$(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $1}')
+        [ -n "$pids_cf" ] && kill -9 $pids_cf >/dev/null 2>&1
     else
-        kill -9 $(ps -ef | grep xray | grep -v grep | awk '{print $2}') >/dev/null 2>&1
-        kill -9 $(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $2}') >/dev/null 2>&1
+        pids_xray=$(ps -ef | grep xray | grep -v grep | awk '{print $2}')
+        [ -n "$pids_xray" ] && kill -9 $pids_xray >/dev/null 2>&1
+        pids_cf=$(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $2}')
+        [ -n "$pids_cf" ] && kill -9 $pids_cf >/dev/null 2>&1
     fi
     pkill -f "http.server" >/dev/null 2>&1
     
@@ -53,7 +57,7 @@ manage_cache() {
             1)
                 echo ""
                 _clear_cache
-                read -p "按回者键继续..."
+                read -p "按回车键继续..."
                 ;;
             0)
                 break
