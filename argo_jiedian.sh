@@ -2,7 +2,7 @@
 
 # ==============================================================
 # 一键 Argo 6 节点与 Quicktunnel 部署模块 (argo_jiedian.sh)
-# 已完美集成：重启后自动恢复、动态抓取新临时域名与订阅自动更新
+# 已完美集成：重启后自动恢复、原生内嵌 SS 恢复链与动态订阅更新
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -348,7 +348,7 @@ echo -e "$port_vless\n$port_trojan\n$sub_port" > "$LAST_PORTS_FILE"
 
 
 # ==============================================================
-# 💡 自动生成开机恢复脚本与注册系统服务 (使用独立的 EOF_UPDATE 标记)
+# 💡 核心修复：自动生成开机恢复脚本（直接在内部原生集成 SS 恢复模块）
 # ==============================================================
 cat > /etc/yuzhou/auto_argo_update.sh << 'EOF_UPDATE'
 #!/bin/bash
@@ -439,6 +439,24 @@ for d in "$argo_tr" "${opt_domains[@]}"; do
 EOF_CLASH
 done
 
+# === 原生内置 SS 节点开机恢复逻辑 ===
+if [ -f "/etc/yuzhou/ss_config.env" ]; then
+    source /etc/yuzhou/ss_config.env
+    s_v6=$(ip -6 addr show scope global | grep inet6 | awk '{print $2}' | cut -d/ -f1 | head -n 1 | tr -d '\n\r ')
+    [ -z "$s_v6" ] && s_v6=$(curl -s6 --connect-timeout 3 https://api64.ipify.org 2>/dev/null | tr -d '\n\r ')
+    [ -z "$s_v6" ] && s_v6=$(curl -s6 --connect-timeout 3 https://ipv6.icanhazip.com 2>/dev/null | tr -d '\n\r ')
+    if [ -n "$s_v6" ]; then
+        ss_info="${SS_METHOD}:${SS_PASS}"
+        if [ "$(grep -i PRETTY_NAME /etc/os-release 2>/dev/null | cut -d \" -f2 | awk '{print $1}')" == "Alpine" ]; then
+            ss_b64=$(echo -n "$ss_info" | base64 | tr -d '\n')
+        else
+            ss_b64=$(echo -n "$ss_info" | base64 -w 0 2>/dev/null || echo -n "$ss_info" | base64 | tr -d '\n')
+        fi
+        ss_link="ss://${ss_b64}@[${s_v6}]:${SS_PORT}#IPv6-SS-Direct"
+        echo "$ss_link" >> nodes.txt
+    fi
+fi
+
 cat >> clash.yaml <<'EOF_CLASH'
 proxy-groups:
   - name: PROXY
@@ -446,7 +464,6 @@ proxy-groups:
     proxies:
 EOF_CLASH
 
-# 动态写入所有代理名称到 proxy-groups
 grep -oE 'name: "[^"]+"' clash.yaml | sed 's/name: /      - /g' >> clash.yaml
 
 cat >> clash.yaml <<'EOF_CLASH'
@@ -513,5 +530,5 @@ EOF
 
 cat v2ray.txt
 echo -e "\n信息已保存至 ${QUICK_DIR}/v2ray.txt"
-echo -e "${GREEN}✅ 已自动植入开机自启与动态订阅服务，VPS重启后只需点一次更新订阅即可恢复！${NC}"
+echo -e "${GREEN}✅ 已植入包含 SS 恢复的完整开机自启动态订阅服务！${NC}"
 read -p "按回车键返回主菜单..." < /dev/tty
