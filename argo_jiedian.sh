@@ -25,6 +25,18 @@ echo -e "${CYAN}==============================================================${
 echo -e "${CYAN}          一键 Argo 6节点部署与配置模块 (全协议保活版)        ${NC}"
 echo -e "${CYAN}==============================================================${NC}"
 
+# 0. 自动检查并安装 unzip 工具
+if ! command -v unzip &>/dev/null; then
+    echo -e "${YELLOW}检测到系统未安装 unzip，正在自动安装...${NC}"
+    if [ -f /etc/debian_version ]; then
+        apt-get update >/dev/null 2>&1 && apt-get install -y unzip >/dev/null 2>&1
+    elif [ -f /etc/redhat-release ] || grep -qi "rhel" /etc/os-release || grep -qi "centos" /etc/os-release || grep -qi "fedora" /etc/os-release; then
+        yum install -y unzip >/dev/null 2>&1 || dnf install -y unzip >/dev/null 2>&1
+    elif grep -qi "alpine" /etc/os-release 2>/dev/null; then
+        apk add --no-cache unzip >/dev/null 2>&1
+    fi
+fi
+
 # 1. 选择 Argo 连接模式 IPv4 或 IPv6
 read -p "请选择 argo 连接模式 IPV4 或者 IPV6 (输入 4 或 6，默认 4): " ips < /dev/tty
 if [ -z "$ips" ]; then
@@ -291,9 +303,31 @@ else
     base64 -w 0 nodes.txt > sub.txt
 fi
 
-# 获取服务端口与 Token
-sub_port=25000
-[ -f "/etc/yuzhou_sub_port" ] && sub_port=$(cat /etc/yuzhou_sub_port) || { echo "$sub_port" > /etc/yuzhou_sub_port; }
+# 获取服务端口与 Token（优先读取历史记录；若无记录则在 20000-60000 间随机生成并检查占用，确保不冲突后持久化）
+sub_port=""
+if [ -f "/etc/yuzhou_sub_port" ]; then
+    saved_port=$(cat /etc/yuzhou_sub_port)
+    if [[ "$saved_port" =~ ^[0-9]+$ ]]; then
+        sub_port="$saved_port"
+    fi
+fi
+
+if [ -z "$sub_port" ]; then
+    while true; do
+        if command -v python3 &>/dev/null; then
+            candidate_port=$(python3 -c "import random; print(random.randint(20000, 60000))" 2>/dev/null)
+        else
+            candidate_port=$((RANDOM % 40001 + 20000))
+        fi
+        
+        # 检查候选端口是否被占用
+        if ! (ss -tuln | grep -q ":$candidate_port " || netstat -tuln 2>/dev/null | grep -q ":$candidate_port "); then
+            sub_port="$candidate_port"
+            break
+        fi
+    done
+    echo "$sub_port" > /etc/yuzhou_sub_port
+fi
 
 sub_token="sub-$(cat /proc/sys/kernel/random/uuid | awk -F- '{print $1}')"
 [ -f "/etc/yuzhou_sub_token" ] && sub_token=$(cat /etc/yuzhou_sub_token) || { echo "$sub_token" > /etc/yuzhou_sub_token; }
