@@ -87,4 +87,3 @@ manage_uninstall() {
 }
 
 manage_uninstall
-```[cite: 14]
