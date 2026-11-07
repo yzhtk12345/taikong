@@ -89,8 +89,8 @@ rm -rf xray.zip
 
 # 5. 生成 UUID 与端口
 uuid=$(cat /proc/sys/kernel/random/uuid)
-urlpath_vless="vl-$(echo$uuid | awk -F- '{print $1}')"
-urlpath_trojan="tr-$(echo$uuid | awk -F- '{print $1}')"
+urlpath_vless="vl-$(echo "$uuid" | awk -F- '{print $1}')"
+urlpath_trojan="tr-$(echo "$uuid" | awk -F- '{print $1}')"
 
 port_vless=$[$RANDOM+10000]
 port_trojan=$[$port_vless+1]
@@ -152,10 +152,10 @@ EOF
 "${QUICK_DIR}/xray/xray" run -config "${QUICK_DIR}/xray/config.json" >/dev/null 2>&1 &
 echo $! > "${QUICK_DIR}/xray.pid"
 
-"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_vless --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_vless.log 2>&1 &
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_vless --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_vless.log 2>&1 &
 echo $! > "${QUICK_DIR}/cf_vl.pid"
 
-"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_trojan --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_trojan.log 2>&1 &
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_trojan --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_trojan.log 2>&1 &
 echo $! > "${QUICK_DIR}/cf_tr.pid"
 
 sleep 2
@@ -178,12 +178,12 @@ do
         rm -rf argo_vless.log argo_trojan.log
         clear
         echo "argo 获取超时，正在重新尝试建立双隧道..."
-        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_vless --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_vless.log 2>&1 &
+        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_vless --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_vless.log 2>&1 &
         echo $! > "${QUICK_DIR}/cf_vl.pid"
-        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_trojan --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_trojan.log 2>&1 &
+        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_trojan --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_trojan.log 2>&1 &
         echo $! > "${QUICK_DIR}/cf_tr.pid"
         sleep 2
-    elif [[ -z "$argo_vl" \vert{}\vert{} -z "$argo_tr" ]]
+    elif [[ -z "$argo_vl" || -z "$argo_tr" ]]
     then
         sleep 1
     else
@@ -193,8 +193,8 @@ do
 done
 clear
 
-node_tag=$(echo$isp | sed -e 's/_/%20/g' -e 's/,/%2C/g')
-if [[ -z "$node_tag" \vert{}\vert{} "$node_tag" == "--" ]]; then
+node_tag=$(echo "$isp" | sed -e 's/_/%20/g' -e 's/,/%2C/g')
+if [[ -z "$node_tag" || "$node_tag" == "--" ]]; then
     node_tag="Argo_Node"
 fi
 
@@ -221,7 +221,7 @@ for idx in "${!vless_domains[@]}"; do
     d="${vless_domains[$idx]}"
     l="${vless_labels[$idx]}"
 
-    vless_tls="vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_vl}&type=ws&host=${argo_vl}&path=\%2F${urlpath_vless}#${node_tag}-VLESS-${l}-443"
+    vless_tls="vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_vl}&type=ws&host=${argo_vl}&path=%2F${urlpath_vless}#${node_tag}-VLESS-${l}-443"
     echo "$vless_tls" >> nodes.txt
     proxy_names+=("${node_tag}-VLESS-${l}-443")
     cat >> clash.yaml <<EOF
@@ -249,7 +249,7 @@ for idx in "${!trojan_domains[@]}"; do
     d="${trojan_domains[$idx]}"
     l="${trojan_labels[$idx]}"
 
-    trojan_tls="trojan://${uuid}@${d}:443?security=tls&sni=${argo_tr}&type=ws&host=${argo_tr}&path=\%2F${urlpath_trojan}#${node_tag}-Trojan-${l}-443"
+    trojan_tls="trojan://${uuid}@${d}:443?security=tls&sni=${argo_tr}&type=ws&host=${argo_tr}&path=%2F${urlpath_trojan}#${node_tag}-Trojan-${l}-443"
     echo "$trojan_tls" >> nodes.txt
     proxy_names+=("${node_tag}-Trojan-${l}-443")
     cat >> clash.yaml <<EOF
@@ -284,7 +284,7 @@ rules:
   - MATCH,PROXY
 EOF
 
-if [ $(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}') == "Alpine" ]
+if [ "$(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}')" == "Alpine" ]
 then
     base64 nodes.txt | tr -d '\n' > sub.txt
 else
@@ -293,10 +293,10 @@ fi
 
 # 获取服务端口与 Token
 sub_port=25000
-[ -f "/etc/yuzhou_sub_port" ] && sub_port=$(cat /etc/yuzhou_sub_port) \vert{}\vert{} { echo "$sub_port" > /etc/yuzhou_sub_port; }
+[ -f "/etc/yuzhou_sub_port" ] && sub_port=$(cat /etc/yuzhou_sub_port) || { echo "$sub_port" > /etc/yuzhou_sub_port; }
 
 sub_token="sub-$(cat /proc/sys/kernel/random/uuid | awk -F- '{print $1}')"
-[ -f "/etc/yuzhou_sub_token" ] && sub_token=$(cat /etc/yuzhou_sub_token) \vert{}\vert{} { echo "$sub_token" > /etc/yuzhou_sub_token; }
+[ -f "/etc/yuzhou_sub_token" ] && sub_token=$(cat /etc/yuzhou_sub_token) || { echo "$sub_token" > /etc/yuzhou_sub_token; }
 
 secure_web_dir="${SUB_DIR}/${sub_token}"
 mkdir -p "$secure_web_dir" >/dev/null 2>&1
@@ -314,7 +314,7 @@ fi
 # 防火墙端口管理核心逻辑
 # ==============================================================
 echo -e "\n${CYAN}正在检查并更新防火墙放行端口...${NC}"
-ssh_port=$(ss -tlnp | grep -E 'sshd|dropbear' | awk '{print $4}' \vert{} awk -F':' '{print$NF}' | head -n 1)
+ssh_port=$(ss -tlnp | grep -E 'sshd|dropbear' | awk '{print $4}' | awk -F':' '{print $NF}' | head -n 1)
 [ -z "$ssh_port" ] && ssh_port=$(grep -i "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
 [ -z "$ssh_port" ] && ssh_port=22
 
@@ -372,9 +372,9 @@ urlpath_trojan=$(python3 -c "import json; data=json.load(open('$config_file')); 
 [ -z "$uuid" ] && exit 1
 ips=4
 rm -rf argo_vless.log argo_trojan.log
-"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_vless --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_vless.log 2>&1 &
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_vless --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_vless.log 2>&1 &
 echo $! > "${QUICK_DIR}/cf_vl.pid"
-"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_trojan --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_trojan.log 2>&1 &
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_trojan --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_trojan.log 2>&1 &
 echo $! > "${QUICK_DIR}/cf_tr.pid"
 n=0
 argo_vl=""
@@ -382,10 +382,11 @@ argo_tr=""
 while true; do
     n=$[$n+1]
     argo_vl=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_vless.log | head -n 1 | awk -F// '{print $2}')
-    argo_tr=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_trojan.log | head -n 1 | awk -F// '{print $2}') [$n -gt 30 ] && break
-    [[ -z "$argo_vl" \vert{}\vert{} -z "$argo_tr" ]] && sleep 2 || break
+    argo_tr=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_trojan.log | head -n 1 | awk -F// '{print $2}')
+    [ $n -gt 30 ] && break
+    [[ -z "$argo_vl" || -z "$argo_tr" ]] && sleep 2 || break
 done
-[[ -z "$argo_vl" \vert{}\vert{} -z "$argo_tr" ]] && exit 1
+[[ -z "$argo_vl" || -z "$argo_tr" ]] && exit 1
 node_tag="Argo_Node"
 opt_domains=("cf.090227.xyz" "cloudflare.182682.xyz")
 > nodes.txt
@@ -400,7 +401,7 @@ EOF_CLASH
 
 for d in "$argo_vl" "${opt_domains[@]}"; do
     if [ "$d" == "$argo_vl" ]; then l="默认Argo"; else l="优选节点"; fi
-    echo "vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_vl}&type=ws&host=${argo_vl}&path=\%2F${urlpath_vless}#${node_tag}-VLESS-${l}-443" >> nodes.txt
+    echo "vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_vl}&type=ws&host=${argo_vl}&path=%2F${urlpath_vless}#${node_tag}-VLESS-${l}-443" >> nodes.txt
     cat >> clash.yaml <<EOF_CLASH
   - name: "${node_tag}-VLESS-${l}-443"
     type: vless
@@ -421,7 +422,7 @@ done
 
 for d in "$argo_tr" "${opt_domains[@]}"; do
     if [ "$d" == "$argo_tr" ]; then l="默认Argo"; else l="优选节点"; fi
-    echo "trojan://${uuid}@${d}:443?security=tls&sni=${argo_tr}&type=ws&host=${argo_tr}&path=\%2F${urlpath_trojan}#${node_tag}-Trojan-${l}-443" >> nodes.txt
+    echo "trojan://${uuid}@${d}:443?security=tls&sni=${argo_tr}&type=ws&host=${argo_tr}&path=%2F${urlpath_trojan}#${node_tag}-Trojan-${l}-443" >> nodes.txt
     cat >> clash.yaml <<EOF_CLASH
   - name: "${node_tag}-Trojan-${l}-443"
     type: trojan
@@ -449,7 +450,7 @@ if [ -f "/etc/yuzhou/ss_config.env" ]; then
         if [ "$(grep -i PRETTY_NAME /etc/os-release 2>/dev/null | cut -d \" -f2 | awk '{print $1}')" == "Alpine" ]; then
             ss_b64=$(echo -n "$ss_info" | base64 | tr -d '\n')
         else
-            ss_b64=$(echo -n "$ss_info" \vert{} base64 -w 0 2>/dev/null \vert{}\vert{} echo -n "$ss_info" | base64 | tr -d '\n')
+            ss_b64=$(echo -n "$ss_info" | base64 -w 0 2>/dev/null || echo -n "$ss_info" | base64 | tr -d '\n')
         fi
         ss_link="ss://${ss_b64}@[${s_v6}]:${SS_PORT}#IPv6-SS-Direct"
         echo "$ss_link" >> nodes.txt
