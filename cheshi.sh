@@ -188,7 +188,7 @@ while true; do
             read -p "按回车返回..."
             ;;
         2)
-            echo "正在执行第 2 项: 梭哈模式..."
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/zhu_jiedian.sh)
             read -p "按回车返回..."
             ;;
         3)
