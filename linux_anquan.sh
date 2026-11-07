@@ -240,4 +240,9 @@ echo -e " ${RED}【警告】请务必另开一个终端窗口，使用新用户�
 echo -e " ${RED}        后再关闭当前窗口，切勿直接退出当前会话！${NC}"
 echo -e "==============================================================="
 read -p "按回车键退出..." < /dev/tty
-exec bash
+
+# 重新加载系统环境变量与环境变量文件，避免开启新进程打断父菜单
+[ -f /etc/profile ] && source /etc/profile
+[ -f ~/.bashrc ] && source ~/.bashrc
+
+exit 0
