@@ -221,7 +221,7 @@ while true; do
             read -p "按回车返回..."
             ;;
         8)
-            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/warp_daimax.sh)
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/warp_daima.sh)
             read -p "按回车返回..."
             ;;
         9)
