@@ -188,7 +188,7 @@ while true; do
             read -p "按回车返回..."
             ;;
         2)
-            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/zhu_jiedian.sh)
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/argo_jiedian.sh)
             read -p "按回车返回..."
             ;;
         3)
