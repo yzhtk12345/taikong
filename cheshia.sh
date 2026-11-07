@@ -87,7 +87,7 @@ check_system_info() {
         warp_v4_status="${YELLOW}未连接/未启用${NC}"
     fi
 
-    # WARP IPv6 出站检测 (通过代理双栈检测)
+    # WARP IPv6 出站检测 (通过代理双栈检测，如直连v6失败则通过SOCKS代理获取Cloudflare IPv6出口)
     if [ -n "$warp_socks_port" ]; then
         warp_v6=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
     else
@@ -103,6 +103,7 @@ check_system_info() {
         warp_v6_status="${GREEN}已激活 (${warp_v6_ip:-WARP-SOCKS5: $warp_socks_port})${NC}"
     else
         if [ -n "$warp_socks_port" ]; then
+            # 兼容纯IPv4小鸡通过SOCKS5获取Cloudflare双栈IP
             warp_v6_ip=$(curl -s --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
             if [ -n "$warp_v6_ip" ]; then
                 warp_v6_status="${GREEN}已激活 (${warp_v6_ip})${NC}"
@@ -121,12 +122,15 @@ check_system_info() {
         bbr_status="${YELLOW}未开启 ($bbr_result)${NC}"
     fi
 
+    # 修正：完美对齐 /etc/yuzhou/ 下的 Xray 真实安装路径
     xray_path=""
     xray_ver=""
-    if [ -f "/opt/suoha/xray/xray" ]; then
-        xray_path="/opt/suoha/xray/xray"
-    elif [ -f "/opt/suoha_quick/xray/xray" ]; then
-        xray_path="/opt/suoha_quick/xray/xray"
+    if [ -f "${YUZHOU_DIR}/quick/xray/xray" ]; then
+        xray_path="${YUZHOU_DIR}/quick/xray/xray"
+    elif [ -f "${YUZHOU_DIR}/xray/xray" ]; then
+        xray_path="${YUZHOU_DIR}/xray/xray"
+    elif [ -f "${YUZHOU_DIR}/service/xray/xray" ]; then
+        xray_path="${YUZHOU_DIR}/service/xray/xray"
     elif command -v xray &>/dev/null; then
         xray_path=$(command -v xray)
     fi
@@ -146,7 +150,7 @@ check_system_info() {
         warp_svc_status="${RED}未安装${NC}"
     fi
 
-    if [ -f "/root/.acme.sh/acme.sh" ] || [ -d "/etc/yuzhou/domain" ]; then
+    if [ -f "/root/.acme.sh/acme.sh" ] || [ -d "${YUZHOU_DIR}/domain" ]; then
         domain_check_status="${GREEN}已配置/绑定域名${NC}"
     else
         domain_check_status="${YELLOW}未绑定自定义域名${NC}"
