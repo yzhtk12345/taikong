@@ -219,11 +219,11 @@ while true; do
             read -p "按回车返回..."
             ;;
         4)
-            echo "正在执行第 4 项: 卸载服务..."
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/del_daima.sh)
             read -p "按回车返回..."
             ;;
         5)
-            echo "正在执行第 5 项: 清空缓存..."
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/cache_daima.sh)
             read -p "按回车返回..."
             ;;
         6)
