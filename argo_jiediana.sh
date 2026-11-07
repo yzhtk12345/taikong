@@ -348,9 +348,9 @@ echo -e "$port_vless\n$port_trojan\n$sub_port" > "$LAST_PORTS_FILE"
 
 
 # ==============================================================
-# 💡【全新内嵌】自动生成开机恢复脚本与注册系统服务（一键搞定无需手动）
+# 💡 自动生成开机恢复脚本与注册系统服务 (使用独立的 EOF_UPDATE 标记)
 # ==============================================================
-cat > /etc/yuzhou/auto_argo_update.sh << 'EOF'
+cat > /etc/yuzhou/auto_argo_update.sh << 'EOF_UPDATE'
 #!/bin/bash
 YUZHOU_DIR="/etc/yuzhou"
 QUICK_DIR="${YUZHOU_DIR}/quick"
@@ -390,20 +390,19 @@ done
 node_tag="Argo_Node"
 opt_domains=("cf.090227.xyz" "cloudflare.182682.xyz")
 > nodes.txt
-cat > clash.yaml <<EOF
+cat > clash.yaml <<'EOF_CLASH'
 port: 7890
 socks-port: 7891
 allow-lan: false
 mode: rule
 log-level: info
 proxies:
-EOF
-proxy_names=()
+EOF_CLASH
+
 for d in "$argo_vl" "${opt_domains[@]}"; do
     if [ "$d" == "$argo_vl" ]; then l="默认Argo"; else l="优选节点"; fi
     echo "vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_vl}&type=ws&host=${argo_vl}&path=%2F${urlpath_vless}#${node_tag}-VLESS-${l}-443" >> nodes.txt
-    proxy_names+=("${node_tag}-VLESS-${l}-443")
-    cat >> clash.yaml <<EOF
+    cat >> clash.yaml <<EOF_CLASH
   - name: "${node_tag}-VLESS-${l}-443"
     type: vless
     server: ${d}
@@ -418,13 +417,13 @@ for d in "$argo_vl" "${opt_domains[@]}"; do
       path: /${urlpath_vless}
       headers:
         Host: ${argo_vl}
-EOF
+EOF_CLASH
 done
+
 for d in "$argo_tr" "${opt_domains[@]}"; do
     if [ "$d" == "$argo_tr" ]; then l="默认Argo"; else l="优选节点"; fi
     echo "trojan://${uuid}@${d}:443?security=tls&sni=${argo_tr}&type=ws&host=${argo_tr}&path=%2F${urlpath_trojan}#${node_tag}-Trojan-${l}-443" >> nodes.txt
-    proxy_names+=("${node_tag}-Trojan-${l}-443")
-    cat >> clash.yaml <<EOF
+    cat >> clash.yaml <<EOF_CLASH
   - name: "${node_tag}-Trojan-${l}-443"
     type: trojan
     server: ${d}
@@ -437,21 +436,24 @@ for d in "$argo_tr" "${opt_domains[@]}"; do
       path: /${urlpath_trojan}
       headers:
         Host: ${argo_tr}
-EOF
+EOF_CLASH
 done
-cat >> clash.yaml <<EOF
+
+cat >> clash.yaml <<'EOF_CLASH'
 proxy-groups:
   - name: PROXY
     type: select
     proxies:
-EOF
-for pname in "${proxy_names[@]}"; do
-    echo "      - \"${pname}\"" >> clash.yaml
-done
-cat >> clash.yaml <<EOF
+EOF_CLASH
+
+# 动态写入所有代理名称到 proxy-groups
+grep -oE 'name: "[^"]+"' clash.yaml | sed 's/name: /      - /g' >> clash.yaml
+
+cat >> clash.yaml <<'EOF_CLASH'
 rules:
   - MATCH,PROXY
-EOF
+EOF_CLASH
+
 base64 -w 0 nodes.txt > sub.txt
 sub_token=$(cat /etc/yuzhou_sub_token 2>/dev/null || echo "default_token")
 secure_web_dir="${SUB_DIR}/${sub_token}"
@@ -462,11 +464,11 @@ cp -f clash.yaml "${secure_web_dir}/clash.yaml"
 sub_port=$(cat /etc/yuzhou_sub_port 2>/dev/null || echo 25000)
 pkill -f "http.server $sub_port" >/dev/null 2>&1
 nohup python3 -m http.server $sub_port --directory "$SUB_DIR" >/dev/null 2>&1 &
-EOF
+EOF_UPDATE
 
 chmod +x /etc/yuzhou/auto_argo_update.sh
 
-cat > /etc/systemd/system/yuzhou-dynamic-sub.service << 'EOF'
+cat > /etc/systemd/system/yuzhou-dynamic-sub.service << 'EOF_SVC'
 [Unit]
 Description=Yuzhou Dynamic Argo Sub Auto Renewal Service
 After=network-online.target
@@ -479,7 +481,7 @@ ExecStart=/bin/bash /etc/yuzhou/auto_argo_update.sh
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOF_SVC
 
 systemctl daemon-reload >/dev/null 2>&1
 systemctl enable yuzhou-dynamic-sub.service >/dev/null 2>&1
