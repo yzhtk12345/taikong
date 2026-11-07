@@ -60,15 +60,22 @@ if ! command -v warp-cli &>/dev/null; then
 fi
 
 systemctl enable --now warp-svc >/dev/null 2>&1
-sleep 2
 
-# 检测并解决 Registration Missing 问题
-if warp-cli status 2>/dev/null | grep -q "Registration Missing"; then
-    warp-cli registration new >/dev/null 2>&1 || true
-    sleep 2
-fi
+# 循环等待 warp-svc 守护进程完全启动就绪
+echo -e "${CYAN}正在等待 WARP 守护进程启动并就绪...${NC}"
+for i in {1..10}; do
+    if warp-cli status &>/dev/null; then
+        break
+    fi
+    sleep 1
+done
 
-# 配置双栈及代理模式
+# 自动处理注册与协议接受
+warp-cli registration new >/dev/null 2>&1 || true
+sleep 1
+warp-cli accept-tos >/dev/null 2>&1 || true
+
+# 配置双栈及代理模式并连接
 warp-cli mode proxy >/dev/null 2>&1
 warp-cli tunnel ip set-dual-stack >/dev/null 2>&1 || true
 
@@ -83,6 +90,7 @@ done
 # 设置 warp-cli 本地代理端口并连接
 warp-cli proxy port "$warp_local_port" >/dev/null 2>&1
 warp-cli connect >/dev/null 2>&1
+sleep 2
 
 echo -e "${GREEN}✅ WARP 双栈本地代理端口已成功分配并启动: ${CYAN}$warp_local_port${NC}"
 echo "$warp_local_port" > "$LAST_WARP_PORT_FILE"
