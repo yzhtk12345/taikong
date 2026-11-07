@@ -82,16 +82,31 @@ fi
 hostnamectl set-hostname "$new_host"
 echo -e "${GREEN}[+] 主机名已成功更新为: $new_host${NC}\n"
 
-# 3. 设置新用户名
+# 3. 设置新用户名（支持已存在时的交互式选择）
 random_user="user_$(tr -dc 'a-z0-9' < /dev/urandom | head -c 4)"
 while true; do
     read -p "请输入要创建的新用户名 (直接回车随机生成 [$random_user]): " new_user < /dev/tty
     if [ -z "$new_user" ]; then
         new_user="$random_user"
         echo -e "${GREEN}[+] 已自动选择随机用户名: $new_user${NC}"
-        break
-    elif id "$new_user" &>/dev/null; then
-        echo -e "${RED}[-] 用户 '$new_user' 已存在，请重新输入。${NC}"
+    fi
+
+    if id "$new_user" &>/dev/null; then
+        echo -e "${YELLOW}[!] 检测到系统内已存在用户 '$new_user'。${NC}"
+        echo "请选择处理方式："
+        echo "  [1] 删除并重新创建同名用户（清理旧家目录）"
+        echo "  [2] 保留该用户，重新输入其他用户名"
+        read -p "请输入选项 [1/2，默认 2]: " user_choice < /dev/tty
+        [ -z "$user_choice" ] && user_choice=2
+
+        if [ "$user_choice" == "1" ]; then
+            echo -e "${YELLOW}[+] 正在删除已存在的用户 '$new_user' 及其家目录...${NC}"
+            userdel -r "$new_user" >/dev/null 2>&1
+            break
+        else
+            echo -e "${CYAN}已保留原用户，请重新输入新的用户名。${NC}\n"
+            continue
+        fi
     else
         break
     fi
