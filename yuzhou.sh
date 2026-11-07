@@ -234,6 +234,7 @@ while true; do
             ;;
         0)
             echo -e "${GREEN}已成功退出脚本。${NC}"
+            exec bash
             exit 0
             ;;
         *)
