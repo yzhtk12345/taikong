@@ -916,20 +916,110 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
     done
 }
 
+# ==========================================
+# 完整保留您原版的、带有随机生成与 exec bash 的加固函数
+# ==========================================
 action_init_security() {
-    echo "===================================="
+    echo -e "\n===================================="
     echo "  开始执行：系统初始化与安全加固"
     echo "===================================="
-    read -p "请输入新的主机名: " NEW_HOSTNAME < /dev/tty
-    [ -n "$NEW_HOSTNAME" ] && hostnamectl set-hostname "$NEW_HOSTNAME"
-    read -p "请输入新用户名: " NEW_USER < /dev/tty
-    [ -n "$NEW_USER" ] && useradd -m -s /bin/bash "$NEW_USER" && passwd "$NEW_USER"
-    read -p "请输入新 SSH 端口: " NEW_SSH_PORT < /dev/tty
-    [ -n "$NEW_SSH_PORT" ] && sed -i "s/^#\?Port .*/Port $NEW_SSH_PORT/" /etc/ssh/sshd_config
-    sed -i "s/^#\?PermitRootLogin .*/PermitRootLogin no/" /etc/ssh/sshd_config
-    systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null
-    echo "安全加固完成！"
-    read -p "按回车键返回主菜单..." < /dev/tty
+
+    CURRENT_HOSTNAME=$(hostname)
+    RANDOM_HOST="vps-$(tr -dc 'a-z0-9' < /dev/urandom | head -c 4)"
+    read -p "请输入新的主机名 (直接回车保持当前 [$CURRENT_HOSTNAME]，或随机生成 [$RANDOM_HOST]): " NEW_HOSTNAME < /dev/tty
+    if [ -n "$NEW_HOSTNAME" ]; then
+        hostnamectl set-hostname "$NEW_HOSTNAME"
+        CURRENT_HOSTNAME="$NEW_HOSTNAME"
+        echo "[+] 主机名已成功修改为: $NEW_HOSTNAME"
+    else
+        hostnamectl set-hostname "$RANDOM_HOST"
+        CURRENT_HOSTNAME="$RANDOM_HOST"
+        echo "[+] 已自动随机生成并应用主机名: $RANDOM_HOST"
+    fi
+
+    RANDOM_USER="user_$(tr -dc 'a-z0-9' < /dev/urandom | head -c 4)"
+    while true; do
+        read -p "请输入要创建的新用户名 (直接回车将随机生成 [$RANDOM_USER]): " NEW_USER < /dev/tty
+        if [ -z "$NEW_USER" ]; then
+            NEW_USER="$RANDOM_USER"
+            echo "[+] 已自动随机生成用户名: $NEW_USER"
+            break
+        elif id "$NEW_USER" &>/dev/null; then
+            echo "[-] 用户 '$NEW_USER' 已经存在，请更换一个用户名。"
+        else
+            break
+        fi
+    done
+
+    useradd -m -s /bin/bash "$NEW_USER"
+    echo "[+] 请为用户 '$NEW_USER' 设置密码："
+    passwd "$NEW_USER"
+    echo "[+] 用户 '$NEW_USER' 创建成功！"
+
+    if grep -q "^sudo:" /etc/group; then
+        usermod -aG sudo "$NEW_USER"
+        echo "[+] 已将 '$NEW_USER' 添加到 sudo 组"
+    elif grep -q "^wheel:" /etc/group; then
+        usermod -aG wheel "$NEW_USER"
+        echo "[+] 已将 '$NEW_USER' 添加到 wheel 组"
+    else
+        echo "$NEW_USER ALL=(ALL:ALL) ALL" >> /etc/sudoers.d/"$NEW_USER"
+        echo "[+] 已独立写入 sudoers 规则。"
+    fi
+
+    SSHD_CONFIG="/etc/ssh/sshd_config"
+    RANDOM_PORT=$((RANDOM % 64512 + 1024))
+    while true; do
+        read -p "请输入新的 SSH 端口 (1024-65535，直接回车随机生成 [$RANDOM_PORT]): " NEW_SSH_PORT < /dev/tty
+        if [ -z "$NEW_SSH_PORT" ]; then
+            NEW_SSH_PORT="$RANDOM_PORT"
+            echo "[+] 已自动随机生成 SSH 端口: $NEW_SSH_PORT"
+            break
+        elif [[ "$NEW_SSH_PORT" =~ ^[0-9]+$ ]] && [ "$NEW_SSH_PORT" -ge 1 ] && [ "$NEW_SSH_PORT" -le 65535 ]; then
+            break
+        else
+            echo "[-] 格式错误，请输入 1 到 65535 之间的数字。"
+        fi
+    done
+
+    cp "$SSHD_CONFIG" "${SSHD_CONFIG}.bak_$(date +%F_%T)"
+    if grep -qE "^#?Port " "$SSHD_CONFIG"; then
+        sed -i "s/^#\?Port .*/Port $NEW_SSH_PORT/" "$SSHD_CONFIG"
+    else
+        echo "Port $NEW_SSH_PORT" >> "$SSHD_CONFIG"
+    fi
+
+    if grep -qE "^#?PermitRootLogin " "$SSHD_CONFIG"; then
+        sed -i "s/^#\?PermitRootLogin .*/PermitRootLogin no/" "$SSHD_CONFIG"
+    else
+        echo "PermitRootLogin no" >> "$SSHD_CONFIG"
+    fi
+
+    if sshd -t; then
+        if systemctl list-units --full -all | grep -q "ssh.service"; then
+            systemctl restart ssh
+        elif systemctl list-units --full -all | grep -q "sshd.service"; then
+            systemctl restart sshd
+        fi
+        echo "[√] SSH 服务重启成功！"
+    else
+        echo "[-] 错误：SSH 配置文件语法检查未通过！已自动恢复备份。"
+        cp "${SSHD_CONFIG}.bak_"* "$SSHD_CONFIG"
+        return
+    fi
+
+    echo -e "\n===================================="
+    echo "         安全加固执行完毕！          "
+    echo "===================================="
+    echo " - 当前主机名   : $CURRENT_HOSTNAME"
+    echo " - 新用户名     : $NEW_USER"
+    echo " - 新 SSH 端口  : $NEW_SSH_PORT"
+    echo " - Root 远程登录: 已禁用"
+    echo "------------------------------------"
+    echo " 【警告】请立刻新开终端测试新用户登录，切勿关闭当前窗口！"
+    
+    # 执行刷新 Shell，让环境和显示正确
+    exec bash
 }
 
 _bbr_check() {
