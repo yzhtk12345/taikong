@@ -548,7 +548,7 @@ with open('$cfg_json', 'w', encoding='utf-8') as f:
     read -p "按回车键返回..."
 }
 
-# 8. 配置 Cloudflare WARP 灵活路由与分流 (已增加 warp-cli 命令存在性安全检测)
+# 8. 配置 Cloudflare WARP 灵活路由与分流 (严格恢复您原版代码的写法)
 configure_warp_routing() {
     local cfg_json="/opt/kkk_quick/xray/config.json"
     if [ ! -f "$cfg_json" ]; then
@@ -558,10 +558,8 @@ configure_warp_routing() {
     fi
     
     if ! command -v warp-cli &>/dev/null; then
-        echo "[-] 未检测到 warp-cli 客户端。正在尝试自动安装 cloudflare-warp..."
         apt update && apt install -y cloudflare-warp >/dev/null 2>&1 || true
     fi
-
     systemctl enable --now warp-svc >/dev/null 2>&1
     warp-cli registration new >/dev/null 2>&1 || true
     warp-cli mode proxy >/dev/null 2>&1
@@ -638,18 +636,12 @@ with open('$cfg_json', 'w', encoding='utf-8') as f:
                 ;;
             3)
                 echo ""
-                if command -v warp-cli &>/dev/null; then
-                    warp-cli status
-                else
-                    echo "[-] 未检测到 warp-cli 客户端，无法查询状态。"
-                fi
+                warp-cli status
                 echo ""
                 read -p "按回车键继续..." < /dev/tty
                 ;;
             4)
-                if command -v warp-cli &>/dev/null; then
-                    warp-cli disconnect >/dev/null 2>&1 || true
-                fi
+                warp-cli disconnect >/dev/null 2>&1 || true
                 systemctl stop warp-svc >/dev/null 2>&1 || true
                 echo "✅ WARP 已关闭。"
                 read -p "按回车键继续..." < /dev/tty
