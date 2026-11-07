@@ -143,21 +143,21 @@ red "安装acme.sh证书申请程序失败" && exit
 fi
 }
 
-# 检查证书及生成状态（已全部指向 /opt/suoha_quick/）
+# 检查证书及生成状态（已全部指向 /etc/yuzhou/yuming/）
 checktls(){
-if [[ -s /opt/suoha_quick/cert.crt && -s /opt/suoha_quick/private.key ]]; then
+if [[ -s /etc/yuzhou/yuming/cert.crt && -s /etc/yuzhou/yuming/private.key ]]; then
 cronac
-green "IP域名证书申请成功或已存在！域名证书（cert.crt）和密钥（private.key）已保存到 /opt/suoha_quick 文件夹内" 
+green "IP域名证书申请成功或已存在！域名证书（cert.crt）和密钥（private.key）已保存到 /etc/yuzhou/yuming 文件夹内" 
 yellow "公钥文件crt路径如下，可直接复制"
-green "/opt/suoha_quick/cert.crt"
+green "/etc/yuzhou/yuming/cert.crt"
 yellow "密钥文件key路径如下，可直接复制"
-green "/opt/suoha_quick/private.key"
+green "/etc/yuzhou/yuming/private.key"
 ym=`bash ~/.acme.sh/acme.sh --list | awk 'NR>1{print $1}' | tail -1`
-echo $ym > /opt/suoha_quick/ca.log
+echo $ym > /etc/yuzhou/yuming/ca.log
 else
 bash ~/.acme.sh/acme.sh --uninstall >/dev/null 2>&1
-# 安全清理：仅删除证书相关文件，不破坏 /opt/suoha_quick 目录下的其他服务文件
-rm -f /opt/suoha_quick/cert.crt /opt/suoha_quick/private.key /opt/suoha_quick/ca.log
+# 安全清理：仅删除证书相关文件，不破坏 /etc/yuzhou/yuming 目录下的其他服务文件
+rm -f /etc/yuzhou/yuming/cert.crt /etc/yuzhou/yuming/private.key /etc/yuzhou/yuming/ca.log
 rm -rf ~/.acme.sh acme.sh
 uncronac
 red "遗憾，IP域名证书申请失败，建议如下："
@@ -171,7 +171,7 @@ fi
 }
 
 installCA(){
-bash ~/.acme.sh/acme.sh --install-cert -d ${ym} --key-file /opt/suoha_quick/private.key --fullchain-file /opt/suoha_quick/cert.crt --ecc
+bash ~/.acme.sh/acme.sh --install-cert -d ${ym} --key-file /etc/yuzhou/yuming/private.key --fullchain-file /etc/yuzhou/yuming/cert.crt --ecc
 }
 
 checkip(){
@@ -204,11 +204,11 @@ green "当前域名解析到的IPV6地址：$domainIP"
 else
 green "当前域名解析到的IPV4地址：$domainIP"
 fi
-if [[ ! $domainIP =~ $v4 ]] && [[ ! $domainIP =~ $v6 ]]; then
+if [[ ! $domainIP =~$v4 ]] && [[ ! $domainIP =~$v6 ]]; then
 yellow "当前VPS本地的IP：$vpsip"
 red "当前域名解析的IP与当前VPS本地的IP不匹配！！！"
 green "建议如下："
-if [[ "$v6" == "2a09"* || "$v4" == "104.28"* ]]; then
+if [[ "$v6" == "2a09"* \vert{}\vert{} "$v4" == "104.28"* ]]; then
 yellow "WARP未能自动关闭，请手动关闭！或者使用支持自动关闭与开启的甬哥WARP脚本"
 else
 yellow "1、请确保CDN小黄云关闭状态(仅限DNS)，其他域名解析网站设置同理"
@@ -243,7 +243,7 @@ else
 vpsip=$v4
 fi
 green "VPS本地的IP：$vpsip"
-if [[ "$v6" == "2a09"* || "$v4" == "104.28"* ]]; then
+if [[ "$v6" == "2a09"* \vert{}\vert{} "$v4" == "104.28"* ]]; then
 red "经检测，你申请了WARP的IP。请关闭WARP后再申请IP证书" && exit
 fi
 readp "请输入申请IP证书的IP【格式：IPV4或者IPV6或者IPV4 IPV6，回车跳过使用${vpsip%% *}】:" ym
@@ -258,7 +258,7 @@ bash ~/.acme.sh/acme.sh --issue -d "$ip1" -d "$ip2" --standalone -k ec-256 --ser
 else
 bash ~/.acme.sh/acme.sh --issue -d "$ym" --standalone -k ec-256 --server letsencrypt --cert-profile shortlived --days 3 --insecure
 fi
-bash ~/.acme.sh/acme.sh --install-cert -d "$ip1" --key-file /opt/suoha_quick/private.key --fullchain-file /opt/suoha_quick/cert.crt --ecc
+bash ~/.acme.sh/acme.sh --install-cert -d "$ip1" --key-file /etc/yuzhou/yuming/private.key --fullchain-file /etc/yuzhou/yuming/cert.crt --ecc
 checktls
 }
 
@@ -268,10 +268,10 @@ readp "请输入解析完成的域名:" ym
 green "已输入的域名:$ym" && sleep 1
 checkacmeca
 checkip
-if [[ $domainIP = $v4 ]]; then
+if [[ $domainIP =$v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue -d ${ym} --standalone -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP = $v6 ]]; then
+if [[ $domainIP =$v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue -d ${ym} --standalone -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 installCA
@@ -309,10 +309,10 @@ else
     readp "请复制Cloudflare的Global API Key：" GAK
     export CF_Key="$GAK"
 fi
-if [[ $domainIP = $v4 ]]; then
+if [[ $domainIP =$v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP = $v6 ]]; then
+if [[ $domainIP =$v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 ;;
@@ -321,10 +321,10 @@ readp "请复制腾讯云DNSPod的DP_Id：" DPID
 export DP_Id="$DPID"
 readp "请复制腾讯云DNSPod的DP_Key：" DPKEY
 export DP_Key="$DPKEY"
-if [[ $domainIP = $v4 ]]; then
+if [[ $domainIP =$v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_dp -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP = $v6 ]]; then
+if [[ $domainIP =$v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_dp -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 ;;
@@ -333,10 +333,10 @@ readp "请复制阿里云Aliyun的Ali_Key：" ALKEY
 export Ali_Key="$ALKEY"
 readp "请复制阿里云Aliyun的Ali_Secret：" ALSER
 export Ali_Secret="$ALSER"
-if [[ $domainIP = $v4 ]]; then
+if [[ $domainIP =$v4 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_ali -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP = $v6 ]]; then
+if [[ $domainIP =$v6 ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_ali -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 esac
@@ -393,7 +393,7 @@ fi
 }
 
 acme(){
-mkdir -p /opt/suoha_quick
+mkdir -p /etc/yuzhou/yuming
 ab="1.选择独立80端口模式申请IP证书（无需域名，小白推荐）\n2.选择独立80端口模式申请域名证书（需域名）\n3.选择DNS API模式申请证书（需域名、ID、Key），自动识别单域名与泛域名\n 请选择："
 readp "$ab" cd
 case "$cd" in 
@@ -409,11 +409,11 @@ green "Main_Domain下显示的域名就是已申请成功的域名证书，Renew
 bash ~/.acme.sh/acme.sh --list
 }
 
-# 证书状态检测逻辑（检查 /opt/suoha_quick/ 下的文件是否真实存在且非空）
+# 证书状态检测逻辑（检查 /etc/yuzhou/yuming/ 下的文件是否真实存在且非空）
 acmeshow(){
 if [[ -n $(~/.acme.sh/acme.sh -v 2>/dev/null) ]]; then
 caacme1=`bash ~/.acme.sh/acme.sh --list | awk 'NR>1{print $1}' | tail -1`
-if [[ -n $caacme1 && !$caacme1 == "Main_Domain" ]] && [[ -f /opt/suoha_quick/cert.crt && -f /opt/suoha_quick/private.key && -s /opt/suoha_quick/cert.crt && -s /opt/suoha_quick/private.key ]]; then
+if [[ -n $caacme1 && !$caacme1 == "Main_Domain" ]] && [[ -f /etc/yuzhou/yuming/cert.crt && -f /etc/yuzhou/yuming/private.key && -s /etc/yuzhou/yuming/cert.crt && -s /etc/yuzhou/yuming/private.key ]]; then
 caacme=$caacme1
 else
 caacme='无证书申请记录'
@@ -453,7 +453,7 @@ uninstall(){
 curl https://get.acme.sh | sh
 bash ~/.acme.sh/acme.sh --uninstall
 # 安全清理：卸载时仅移除证书文件，不影响同目录下的其他核心组件
-rm -f /opt/suoha_quick/cert.crt /opt/suoha_quick/private.key /opt/suoha_quick/ca.log
+rm -f /etc/yuzhou/yuming/cert.crt /etc/yuzhou/yuming/private.key /etc/yuzhou/yuming/ca.log
 rm -rf ~/.acme.sh acme.sh
 sed -i '/acme.sh.env/d' ~/.bashrc 
 source ~/.bashrc
@@ -480,8 +480,8 @@ yellow "1、SSH登录的IP与VPS本地IP必须一致"
 yellow "2、80端口模式仅支持单域名证书申请，在80端口不被占用的情况下支持自动续期"
 yellow "3、DNS API模式不支持freenom免费域名申请，支持单域名与泛域名证书申请，无条件自动续期"
 yellow "4、泛域名申请前须在服务商解析处设置一个名称为 * 字符的解析记录 (输入格式：*.一级或者二级主域)"
-yellow "公钥文件crt保存路径：/opt/suoha_quick/cert.crt"
-yellow "密钥文件key保存路径：/opt/suoha_quick/private.key"
+yellow "公钥文件crt保存路径：/etc/yuzhou/yuming/cert.crt"
+yellow "密钥文件key保存路径：/etc/yuzhou/yuming/private.key"
 echo
 red "========================================================================="
 acmeshow
