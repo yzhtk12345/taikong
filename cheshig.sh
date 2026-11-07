@@ -37,7 +37,7 @@ then
 fi
 
 # ==============================================================================
-# 2. 基础核心工具函数模块 (获取IP, 端口, Token, 同步订阅)
+# 2. 基础核心工具函数模块 (获取IP、端口、Token、启动订阅服务)
 # ==============================================================================
 
 function get_server_ip(){
@@ -90,8 +90,10 @@ function get_or_create_sub_token(){
 function start_sub_server(){
     local web_dir="$1"
     local port="$2"
+
     pkill -f "http.server $port" >/dev/null 2>&1
     fuser -k ${port}/tcp >/dev/null 2>&1
+
     if [ -x "$(command -v python3)" ]; then
         nohup python3 -m http.server $port --directory "$web_dir" >/dev/null 2>&1 &
     elif [ -x "$(command -v python)" ]; then
@@ -100,7 +102,6 @@ function start_sub_server(){
     fi
 }
 
-# 全面同步节点、Base64订阅文件及Clash配置至所有静态及安全Web目录
 function sync_to_static_web(){
     local src_dir="$1"
     local static_dir="/var/www/kkk_sub"
@@ -151,7 +152,7 @@ action_init_security() {
             echo "[+] 已自动随机生成用户名: $NEW_USER"
             break
         elif id "$NEW_USER" &>/dev/null; then
-            echo "[-] 用户 '$NEW_USER' 已存在，请更换。"
+            echo "[-] 用户 '$NEW_USER' 已经存在，请更换一个用户名。"
         else
             break
         fi
@@ -160,6 +161,7 @@ action_init_security() {
     useradd -m -s /bin/bash "$NEW_USER"
     echo "[+] 请为用户 '$NEW_USER' 设置密码："
     passwd "$NEW_USER"
+    echo "[+] 用户 '$NEW_USER' 创建成功！"
 
     if grep -q "^sudo:" /etc/group; then
         usermod -aG sudo "$NEW_USER"
@@ -171,7 +173,7 @@ action_init_security() {
 
     local sshd_config="/etc/ssh/sshd_config"
     RANDOM_PORT=$((RANDOM % 64512 + 1024))
-    read -p "请输入新的 SSH 端口 (1024-65535，回车随机 [$RANDOM_PORT]): " NEW_SSH_PORT < /dev/tty
+    read -p "请输入新的 SSH 端口 (1024-65535，直接回车随机生成 [$RANDOM_PORT]): " NEW_SSH_PORT < /dev/tty
     [ -z "$NEW_SSH_PORT" ] && NEW_SSH_PORT="$RANDOM_PORT"
 
     sed -i "s/^#\?Port .*/Port $NEW_SSH_PORT/" "$sshd_config"
@@ -189,7 +191,7 @@ action_init_security() {
     read -p "按回车键返回主菜单..." < /dev/tty
 }
 
-# 快速梭哈模式 (完整 6 个节点逻辑：默认Argo + 优选域名，含 VLESS 与 Trojan)
+# 快速梭哈模式 (原版 6 个节点逻辑)
 function quicktunnel(){
 mkdir -p /opt/kkk_quick >/dev/null 2>&1
 cd /opt/kkk_quick
@@ -197,6 +199,7 @@ cd /opt/kkk_quick
 [ -f "/opt/kkk_quick/xray.pid" ] && kill -9 $(cat /opt/kkk_quick/xray.pid) >/dev/null 2>&1
 [ -f "/opt/kkk_quick/cf_vl.pid" ] && kill -9 $(cat /opt/kkk_quick/cf_vl.pid) >/dev/null 2>&1
 [ -f "/opt/kkk_quick/cf_tr.pid" ] && kill -9 $(cat /opt/kkk_quick/cf_tr.pid) >/dev/null 2>&1
+
 rm -rf xray cloudflared-linux xray.zip
 
 case "$(uname -m)" in
@@ -209,7 +212,7 @@ case "$(uname -m)" in
     curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -o cloudflared-linux
     ;;
     * )
-    echo "当前架构 $(uname -m) 未适配"
+    echo "当前架构 $(uname -m) 没有适配"
     exit
     ;;
 esac
@@ -222,14 +225,40 @@ rm -rf xray.zip
 uuid=$(cat /proc/sys/kernel/random/uuid)
 urlpath_vless="vl-$(echo $uuid | awk -F- '{print $1}')"
 urlpath_trojan="tr-$(echo $uuid | awk -F- '{print $1}')"
+
 port_vless=$[$RANDOM+10000]
 port_trojan=$[$port_vless+1]
 
 cat>xray/config.json<<EOF
 {
     "inbounds": [
-        {"tag": "vless-in", "port": $port_vless, "listen": "127.0.0.1", "protocol": "vless", "settings": {"decryption": "none", "clients": [{"id": "$uuid"}]}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/$urlpath_vless"}}},
-        {"tag": "trojan-in", "port": $port_trojan, "listen": "127.0.0.1", "protocol": "trojan", "settings": {"clients": [{"password": "$uuid"}]}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/$urlpath_trojan"}}}
+        {
+            "tag": "vless-in",
+            "port": $port_vless,
+            "listen": "127.0.0.1",
+            "protocol": "vless",
+            "settings": {
+                "decryption": "none",
+                "clients": [{"id": "$uuid"}]
+            },
+            "streamSettings": {
+                "network": "ws",
+                "wsSettings": {"path": "/$urlpath_vless"}
+            }
+        },
+        {
+            "tag": "trojan-in",
+            "port": $port_trojan,
+            "listen": "127.0.0.1",
+            "protocol": "trojan",
+            "settings": {
+                "clients": [{"password": "$uuid"}]
+            },
+            "streamSettings": {
+                "network": "ws",
+                "wsSettings": {"path": "/$urlpath_trojan"}
+            }
+        }
     ],
     "outbounds": [{"protocol": "freedom", "settings": {}}]
 }
@@ -245,27 +274,49 @@ echo $! > /opt/kkk_quick/cf_vl.pid
 echo $! > /opt/kkk_quick/cf_tr.pid
 
 sleep 2
+
 n=0
 while true
 do
-    n=$[$n+1]
+n=$[$n+1]
+clear
+echo "等待 Cloudflare Argo 生成双协议专属地址，已等待 $n 秒..."
+argo_vl=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_vless.log | head -n 1 | awk -F// '{print $2}')
+argo_tr=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_trojan.log | head -n 1 | awk -F// '{print $2}')
+
+if [ $n == 20 ]
+then
+    n=0
+    [ -f "/opt/kkk_quick/cf_vl.pid" ] && kill -9 $(cat /opt/kkk_quick/cf_vl.pid) >/dev/null 2>&1
+    [ -f "/opt/kkk_quick/cf_tr.pid" ] && kill -9 $(cat /opt/kkk_quick/cf_tr.pid) >/dev/null 2>&1
+    rm -rf argo_vless.log argo_trojan.log
     clear
-    echo "等待 Cloudflare Argo 生成双协议专属地址，已等待 $n 秒..."
-    argo_vl=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_vless.log | head -n 1 | awk -F// '{print $2}')
-    argo_tr=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_trojan.log | head -n 1 | awk -F// '{print $2}')
-    if [ $n -ge 25 ]; then break; fi
-    if [[ -n "$argo_vl" && -n "$argo_tr" ]]; then break; fi
+    echo "Argo 获取超时，正在重新尝试建立双隧道..."
+    /opt/kkk_quick/cloudflared-linux tunnel --url http://127.0.0.1:$port_vless --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_vless.log 2>&1 &
+    echo $! > /opt/kkk_quick/cf_vl.pid
+    /opt/kkk_quick/cloudflared-linux tunnel --url http://127.0.0.1:$port_trojan --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_trojan.log 2>&1 &
+    echo $! > /opt/kkk_quick/cf_tr.pid
+    sleep 2
+elif [[ -z "$argo_vl" || -z "$argo_tr" ]]
+then
     sleep 1
+else
+    rm -rf argo_vless.log argo_trojan.log
+    break
+fi
 done
 clear
 
 node_tag=$(echo $isp | sed -e 's/_/%20/g' -e 's/,/%2C/g')
-[[ -z "$node_tag" || "$node_tag" == "--" ]] && node_tag="Argo_Node"
+if [[ -z "$node_tag" || "$node_tag" == "--" ]]; then
+    node_tag="Argo_Node"
+fi
 
 opt_domains=("cf.090227.xyz" "cloudflare.182682.xyz")
 opt_labels=("优选cf.090227" "优选182682")
 
 > nodes.txt
+
 cat>clash.yaml<<EOF
 port: 7890
 socks-port: 7891
@@ -279,11 +330,12 @@ proxy_names=()
 vless_domains=("$argo_vl" "${opt_domains[@]}")
 vless_labels=("默认Argo" "${opt_labels[@]}")
 
-# 完整生成 VLESS 节点 (默认Argo + 优选域名)
 for idx in "${!vless_domains[@]}"; do
     d="${vless_domains[$idx]}"
     l="${vless_labels[$idx]}"
-    echo "vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_vl}&type=ws&host=${argo_vl}&path=%2F${urlpath_vless}#${node_tag}-VLESS-${l}-443" >> nodes.txt
+
+    vless_tls="vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_vl}&type=ws&host=${argo_vl}&path=%2F${urlpath_vless}#${node_tag}-VLESS-${l}-443"
+    echo "$vless_tls" >> nodes.txt
     proxy_names+=("${node_tag}-VLESS-${l}-443")
     cat>>clash.yaml<<EOF
   - name: "${node_tag}-VLESS-${l}-443"
@@ -306,11 +358,12 @@ done
 trojan_domains=("$argo_tr" "${opt_domains[@]}")
 trojan_labels=("默认Argo" "${opt_labels[@]}")
 
-# 完整生成 Trojan 节点 (默认Argo + 优选域名)
 for idx in "${!trojan_domains[@]}"; do
     d="${trojan_domains[$idx]}"
     l="${trojan_labels[$idx]}"
-    echo "trojan://${uuid}@${d}:443?security=tls&sni=${argo_tr}&type=ws&host=${argo_tr}&path=%2F${urlpath_trojan}#${node_tag}-Trojan-${l}-443" >> nodes.txt
+
+    trojan_tls="trojan://${uuid}@${d}:443?security=tls&sni=${argo_tr}&type=ws&host=${argo_tr}&path=%2F${urlpath_trojan}#${node_tag}-Trojan-${l}-443"
+    echo "$trojan_tls" >> nodes.txt
     proxy_names+=("${node_tag}-Trojan-${l}-443")
     cat>>clash.yaml<<EOF
   - name: "${node_tag}-Trojan-${l}-443"
@@ -350,13 +403,13 @@ sync_to_static_web "/opt/kkk_quick"
 start_sub_server "/var/www/kkk_sub" "$sub_port"
 
 server_ip=$(get_server_ip)
-[ -z "$server_ip" ] && server_ip="$argo_vl"
+if [ -z "$server_ip" ]; then server_ip="$argo_vl"; fi
 
 sub_online_url="http://${server_ip}:${sub_port}/${sub_token}/sub.txt"
 clash_online_url="http://${server_ip}:${sub_port}/${sub_token}/clash.yaml"
 
 echo -e "=========================================================="
-echo " 梭哈模式部署成功！所有 6 个节点与订阅信息如下："
+echo " 梭哈模式部署成功！节点与订阅信息如下："
 echo "=========================================================="
 echo "通用订阅链接: ${sub_online_url}"
 echo "v2rayN导入:   sub://${sub_online_url}"
@@ -364,17 +417,16 @@ echo "Clash一键:    clash://install-config?url=${clash_online_url}"
 echo "=========================================================="
 }
 
-# 安装服务模式
+# 安装服务模式 (原版逻辑占位)
 function installtunnel(){
 mkdir -p /opt/kkk/ >/dev/null 2>&1
 cd /opt/kkk
 rm -rf xray cloudflared-linux xray.zip
-# (此处保留原有installtunnel逻辑...)
 }
 
 
 # ==============================================================================
-# 4. 额外功能模块 (6. IPv6 SS, 7. Hy2双栈, 8. WARP分流, 9. BBR加速)
+# 4. 额外功能模块 (6. IPv6 SS, 7. Hy2双栈, 8. 原版WARP分流, 9. BBR加速)
 # ==============================================================================
 
 # 6. 额外增加 IPv6 Shadowsocks 直连节点
@@ -399,7 +451,7 @@ function install_ipv6_ss(){
         xray_dir="/opt/kkk_quick"
         cfg_json="/opt/kkk_quick/xray/config.json"
     else
-        echo "未检测到运行中的 Xray 服务！请先运行梭哈或服务模式。"
+        echo "未检测到运行中的 Xray 服务！"
         read -p "按回车键返回..."
         return
     fi
@@ -424,35 +476,20 @@ with open('$cfg_json', 'w', encoding='utf-8') as f:
     json.dump(data, f, indent=4, ensure_ascii=False)
 "
     systemctl restart xray.service 2>/dev/null || pkill -f xray
-
+    
     local ss_user_info="${ss_method}:${ss_password}"
     local ss_base64=$(echo -n "$ss_user_info" | base64 -w 0 2>/dev/null || echo -n "$ss_user_info" | base64 | tr -d '\n')
     local ss_link="ss://${ss_base64}@[${ipv6_addr}]:${ss_port}#IPv6-SS-Direct"
 
     echo "$ss_link" >> "${xray_dir}/nodes.txt"
     sync_to_static_web "$xray_dir"
-
-    local sub_port=$(get_or_create_sub_port)
-    local sub_token=$(get_or_create_sub_token)
-    local server_ip=$(get_server_ip)
-    [ -z "$server_ip" ] && server_ip="$ipv6_addr"
-
-    clear
-    echo "=========================================================="
-    echo "         IPv6 Shadowsocks 直连节点添加成功！         "
-    echo "=========================================================="
-    echo "新增节点链接:"
-    echo "$ss_link"
-    echo "----------------------------------------------------------"
-    echo "✅ 订阅文件已自动更新！您的在线订阅现已包含此节点。"
-    echo "订阅地址: http://${server_ip}:${sub_port}/${sub_token}/sub.txt"
-    echo "=========================================================="
-    read -p "按回车键返回主菜单..." < /dev/tty
+    echo "IPv6 Shadowsocks 直连节点添加成功！"
+    read -p "按回车键返回..."
 }
 
-# 7. 额外增加 Hysteria 2 直连备用节点 (已恢复原版的 IPv4 + IPv6 双栈节点生成逻辑)
+# 7. 额外增加 Hysteria 2 直连备用节点 (原版 IPv4 + IPv6 双栈)
 install_hy2_direct() {
-    echo "正在部署 Hysteria 2 直连备用节点 (IPv4 & IPv6 双栈)..."
+    echo "正在部署 Hysteria 2 直连备用节点..."
     local xray_dir="/opt/kkk_quick"
     local cfg_json="/opt/kkk_quick/xray/config.json"
     
@@ -499,44 +536,23 @@ with open('$cfg_json', 'w', encoding='utf-8') as f:
     pkill -f xray
     nohup /opt/kkk_quick/xray/xray run -config "$cfg_json" >/dev/null 2>&1 &
     
-    clear
-    echo "=========================================================="
-    echo "            Hysteria 2 双栈节点部署成功！              "
-    echo "=========================================================="
-
     if [ -n "$ipv4" ]; then
-        local hy2_v4_link="hysteria2://${hy2_pass}@${ipv4}:${hy2_port}?alpn=h3&pinSHA256=${cert_pin}#Hy2-v4-Backup"
-        echo "$hy2_v4_link" >> "${xray_dir}/nodes.txt"
-        echo "IPv4 节点链接:"
-        echo "$hy2_v4_link"
-        echo "----------------------------------------------------------"
+        echo "hysteria2://${hy2_pass}@${ipv4}:${hy2_port}?alpn=h3&pinSHA256=${cert_pin}#Hy2-v4-Backup" >> "${xray_dir}/nodes.txt"
     fi
-
     if [ -n "$ipv6" ]; then
-        local hy2_v6_link="hysteria2://${hy2_pass}@[${ipv6}]:${hy2_port}?alpn=h3&pinSHA256=${cert_pin}#Hy2-v6-Backup"
-        echo "$hy2_v6_link" >> "${xray_dir}/nodes.txt"
-        echo "IPv6 节点链接:"
-        echo "$hy2_v6_link"
-        echo "----------------------------------------------------------"
+        echo "hysteria2://${hy2_pass}@[${ipv6}]:${hy2_port}?alpn=h3&pinSHA256=${cert_pin}#Hy2-v6-Backup" >> "${xray_dir}/nodes.txt"
     fi
-
+    
     sync_to_static_web "$xray_dir"
-
-    local sub_port=$(get_or_create_sub_port)
-    local sub_token=$(get_or_create_sub_token)
-    local server_ip=$(get_server_ip)
-
-    echo "✅ 订阅文件已自动更新！包含新增的 IPv4/IPv6 Hy2 节点。"
-    echo "订阅地址: http://${server_ip}:${sub_port}/${sub_token}/sub.txt"
-    echo "=========================================================="
-    read -p "按回车键返回主菜单..." < /dev/tty
+    echo "Hysteria 2 双栈节点部署成功！"
+    read -p "按回车键返回..."
 }
 
-# 8. 配置 Cloudflare WARP 灵活路由与分流
+# 8. 配置 Cloudflare WARP 灵活路由与分流 (完全恢复您原版的 warp-cli 逻辑)
 configure_warp_routing() {
     local cfg_json="/opt/kkk_quick/xray/config.json"
     if [ ! -f "$cfg_json" ]; then
-        echo "未找到 Xray 配置文件！请先运行梭哈模式。"
+        echo "未找到 Xray 配置文件！"
         read -p "按回车键返回..."
         return
     fi
@@ -687,7 +703,7 @@ manage_bbr() {
 
 
 # ==============================================================================
-# 5. 主菜单入口及循环分发逻辑
+# 5. 主菜单入口及循环分发逻辑 (已修复返回主菜单死循环)
 # ==============================================================================
 while true; do
     clear
