@@ -239,7 +239,7 @@ while true; do
             read -p "按回车返回..."
             ;;
         9)
-            echo "正在执行第 9 项: BBR 管理..."
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/bbr_daima.sh)
             read -p "按回车返回..."
             ;;
         10)
