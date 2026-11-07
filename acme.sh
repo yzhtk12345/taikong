@@ -58,7 +58,7 @@ elif [ -x "$(command -v dnf)" ]; then
 dnf update -y
 dnf install socat -y
 fi
-if [[ $release = Centos &&"${vsid}" =~ 8 ]]; then
+if [[ "$release" == "Centos" ]] && [[ "${vsid}" =~ 8 ]]; then
 cd /etc/yum.repos.d/ && mkdir backup && mv *repo backup/ 
 curl -o /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-8.repo
 sed -i -e "s|mirrors.cloud.aliyuncs.com|mirrors.aliyun.com|g " /etc/yum.repos.d/CentOS-*
@@ -66,7 +66,7 @@ sed -i -e "s|releasever|releasever-stream|g" /etc/yum.repos.d/CentOS-*
 yum clean all && yum makecache
 cd
 fi
-if [ -x "$(command -v yum)" ] \vert{}\vert{} [ -x "$(command -v dnf)" ]; then
+if [ -x "$(command -v yum)" ] || [ -x "$(command -v dnf)" ]; then
 if ! command -v "cronie" &> /dev/null; then
 if [ -x "$(command -v yum)" ]; then
 yum install -y cronie
@@ -143,7 +143,6 @@ red "安装acme.sh证书申请程序失败" && exit
 fi
 }
 
-# 检查证书及生成状态（已全部指向 /etc/yuzhou/yuming/）
 checktls(){
 if [[ -s /etc/yuzhou/yuming/cert.crt && -s /etc/yuzhou/yuming/private.key ]]; then
 cronac
@@ -156,7 +155,6 @@ ym=`bash ~/.acme.sh/acme.sh --list | awk 'NR>1{print $1}' | tail -1`
 echo $ym > /etc/yuzhou/yuming/ca.log
 else
 bash ~/.acme.sh/acme.sh --uninstall >/dev/null 2>&1
-# 安全清理：仅删除证书相关文件，不破坏 /etc/yuzhou/yuming 目录下的其他服务文件
 rm -f /etc/yuzhou/yuming/cert.crt /etc/yuzhou/yuming/private.key /etc/yuzhou/yuming/ca.log
 rm -rf ~/.acme.sh acme.sh
 uncronac
@@ -183,7 +181,7 @@ vpsip="$v6 或者 $v4"
 else
 vpsip=$v4
 fi
-domainIP=$(dig @8.8.8.8 +time=2 +short "$ym" 2>/dev/null \vert{} grep -m1 '^[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+$')
+domainIP=$(dig @8.8.8.8 +time=2 +short "$ym" 2>/dev/null | grep -m1 '^[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+$')
 if echo $domainIP | grep -q "network unreachable\|timed out" || [[ -z $domainIP ]]; then
 domainIP=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$ym" 2>/dev/null | grep -m1 ':')
 fi
@@ -204,11 +202,11 @@ green "当前域名解析到的IPV6地址：$domainIP"
 else
 green "当前域名解析到的IPV4地址：$domainIP"
 fi
-if [[ ! $domainIP =~$v4 ]] && [[ ! $domainIP =~$v6 ]]; then
+if [[ ! "$domainIP" =~ "$v4" ]] && [[ ! "$domainIP" =~ "$v6" ]]; then
 yellow "当前VPS本地的IP：$vpsip"
 red "当前域名解析的IP与当前VPS本地的IP不匹配！！！"
 green "建议如下："
-if [[ "$v6" == "2a09"* \vert{}\vert{} "$v4" == "104.28"* ]]; then
+if [[ "$v6" == "2a09"* || "$v4" == "104.28"* ]]; then
 yellow "WARP未能自动关闭，请手动关闭！或者使用支持自动关闭与开启的甬哥WARP脚本"
 else
 yellow "1、请确保CDN小黄云关闭状态(仅限DNS)，其他域名解析网站设置同理"
@@ -243,7 +241,7 @@ else
 vpsip=$v4
 fi
 green "VPS本地的IP：$vpsip"
-if [[ "$v6" == "2a09"* \vert{}\vert{} "$v4" == "104.28"* ]]; then
+if [[ "$v6" == "2a09"* || "$v4" == "104.28"* ]]; then
 red "经检测，你申请了WARP的IP。请关闭WARP后再申请IP证书" && exit
 fi
 readp "请输入申请IP证书的IP【格式：IPV4或者IPV6或者IPV4 IPV6，回车跳过使用${vpsip%% *}】:" ym
@@ -268,10 +266,10 @@ readp "请输入解析完成的域名:" ym
 green "已输入的域名:$ym" && sleep 1
 checkacmeca
 checkip
-if [[ $domainIP =$v4 ]]; then
+if [[ "$domainIP" == "$v4" ]]; then
 bash ~/.acme.sh/acme.sh --issue -d ${ym} --standalone -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP =$v6 ]]; then
+if [[ "$domainIP" == "$v6" ]]; then
 bash ~/.acme.sh/acme.sh --issue -d ${ym} --standalone -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 installCA
@@ -309,10 +307,10 @@ else
     readp "请复制Cloudflare的Global API Key：" GAK
     export CF_Key="$GAK"
 fi
-if [[ $domainIP =$v4 ]]; then
+if [[ "$domainIP" == "$v4" ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP =$v6 ]]; then
+if [[ "$domainIP" == "$v6" ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 ;;
@@ -321,10 +319,10 @@ readp "请复制腾讯云DNSPod的DP_Id：" DPID
 export DP_Id="$DPID"
 readp "请复制腾讯云DNSPod的DP_Key：" DPKEY
 export DP_Key="$DPKEY"
-if [[ $domainIP =$v4 ]]; then
+if [[ "$domainIP" == "$v4" ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_dp -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP =$v6 ]]; then
+if [[ "$domainIP" == "$v6" ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_dp -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 ;;
@@ -333,10 +331,10 @@ readp "请复制阿里云Aliyun的Ali_Key：" ALKEY
 export Ali_Key="$ALKEY"
 readp "请复制阿里云Aliyun的Ali_Secret：" ALSER
 export Ali_Secret="$ALSER"
-if [[ $domainIP =$v4 ]]; then
+if [[ "$domainIP" == "$v4" ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_ali -d ${ym} -k ec-256 --server letsencrypt --insecure
 fi
-if [[ $domainIP =$v6 ]]; then
+if [[ "$domainIP" == "$v6" ]]; then
 bash ~/.acme.sh/acme.sh --issue --dns dns_ali -d ${ym} -k ec-256 --server letsencrypt --listen-v6 --insecure
 fi
 esac
@@ -347,7 +345,7 @@ checktls
 ACMEDNScheck(){
 wgcfv6=$(curl -s6m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
 wgcfv4=$(curl -s4m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
-if [[ ! $wgcfv4 =~ on\vert{}plus && !$wgcfv6 =~ on|plus ]]; then
+if [[ ! "$wgcfv4" =~ on\vert{}plus && ! "$wgcfv6" =~ on|plus ]]; then
 ACMEDNS
 else
 systemctl stop wg-quick@wgcf >/dev/null 2>&1
@@ -363,7 +361,7 @@ fi
 ACMEstandaloneDNScheck(){
 wgcfv6=$(curl -s6m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
 wgcfv4=$(curl -s4m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
-if [[ ! $wgcfv4 =~ on\vert{}plus && !$wgcfv6 =~ on|plus ]]; then
+if [[ ! "$wgcfv4" =~ on\vert{}plus && ! "$wgcfv6" =~ on|plus ]]; then
 ACMEstandaloneDNS
 else
 systemctl stop wg-quick@wgcf >/dev/null 2>&1
@@ -379,7 +377,7 @@ fi
 ACMEstandaloneIPcheck(){
 wgcfv6=$(curl -s6m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
 wgcfv4=$(curl -s4m6 https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
-if [[ ! $wgcfv4 =~ on\vert{}plus && !$wgcfv6 =~ on|plus ]]; then
+if [[ ! "$wgcfv4" =~ on\vert{}plus && ! "$wgcfv6" =~ on|plus ]]; then
 ACMEstandaloneIP
 else
 systemctl stop wg-quick@wgcf >/dev/null 2>&1
@@ -409,11 +407,10 @@ green "Main_Domain下显示的域名就是已申请成功的域名证书，Renew
 bash ~/.acme.sh/acme.sh --list
 }
 
-# 证书状态检测逻辑（检查 /etc/yuzhou/yuming/ 下的文件是否真实存在且非空）
 acmeshow(){
 if [[ -n $(~/.acme.sh/acme.sh -v 2>/dev/null) ]]; then
 caacme1=`bash ~/.acme.sh/acme.sh --list | awk 'NR>1{print $1}' | tail -1`
-if [[ -n $caacme1 && !$caacme1 == "Main_Domain" ]] && [[ -f /etc/yuzhou/yuming/cert.crt && -f /etc/yuzhou/yuming/private.key && -s /etc/yuzhou/yuming/cert.crt && -s /etc/yuzhou/yuming/private.key ]]; then
+if [[ -n "$caacme1" && "$caacme1" != "Main_Domain" ]] && [[ -f /etc/yuzhou/yuming/cert.crt && -f /etc/yuzhou/yuming/private.key && -s /etc/yuzhou/yuming/cert.crt && -s /etc/yuzhou/yuming/private.key ]]; then
 caacme=$caacme1
 else
 caacme='无证书申请记录'
@@ -452,7 +449,6 @@ uninstall(){
 [[ -z $(~/.acme.sh/acme.sh -v 2>/dev/null) ]] && yellow "未安装acme.sh证书申请，无法执行" && exit 
 curl https://get.acme.sh | sh
 bash ~/.acme.sh/acme.sh --uninstall
-# 安全清理：卸载时仅移除证书文件，不影响同目录下的其他核心组件
 rm -f /etc/yuzhou/yuming/cert.crt /etc/yuzhou/yuming/private.key /etc/yuzhou/yuming/ca.log
 rm -rf ~/.acme.sh acme.sh
 sed -i '/acme.sh.env/d' ~/.bashrc 
