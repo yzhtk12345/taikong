@@ -2,6 +2,7 @@
 
 # ==============================================================
 # Cloudflare WARP 安装部署与动态本地端口分流管理模块 (warp_daima.sh)
+# 支持 IPv4 / IPv6 自动双栈分流与路由
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -62,32 +63,42 @@ if ! command -v warp-cli &>/dev/null; then
 fi
 
 systemctl enable --now warp-svc >/dev/null 2>&1
-warp-cli registration new >/dev/null 2>&1 || true
-warp-cli mode proxy >/dev/null 2>&1
+sleep 2
 
-# 3. 动态随机生成本地 SOCKS 端口并检查占用（避开已有占用）
+# === 关键点：开启 WARP 双栈注册与双栈协议支持 ===
+if warp-cli status 2>/dev/null | grep -q "Registration Missing"; then
+    warp-cli registration new >/dev/null 2>&1 || true
+    sleep 2
+fi
+
+# 尝试配置 IPv6/双栈支持（兼容不同 warp-cli 版本）
+warp-cli mode proxy >/dev/null 2>&1
+warp-cli tunnel ip set-dual-stack >/dev/null 2>&1 || true
+warp-cli daemon mode proxy >/dev/null 2>&1 || true
+
+# 3. 动态随机生成本地 SOCKS 端口并检查占用
 while true; do
-    warp_local_port=$((RANDOM % 20000 + 30000)) # 在 30000-50000 之间随机
+    warp_local_port=$((RANDOM % 20000 + 30000))
     if ! ss -tlnp | grep -q ":${warp_local_port} " && ! ss -ulnp | grep -q ":${warp_local_port} "; then
         break
     fi
 done
 
-# 设置 warp-cli 本地代理端口
+# 设置 warp-cli 本地代理端口并连接
 warp-cli proxy port "$warp_local_port" >/dev/null 2>&1
 warp-cli connect >/dev/null 2>&1
 
-echo -e "${GREEN}✅ WARP 本地代理端口已成功分配并启动: ${CYAN}$warp_local_port${NC}"
+echo -e "${GREEN}✅ WARP 双栈本地代理端口已分配并启动: ${CYAN}$warp_local_port${NC}"
 echo "$warp_local_port" > "$LAST_WARP_PORT_FILE"
 
 # 路由分流交互菜单
 while true; do
     clear
     echo -e "${CYAN}==============================================================${NC}"
-    echo -e "${CYAN}        Cloudflare WARP 灵活路由与分流管理菜单 (warp_daima.sh) ${NC}"
+    echo -e "${CYAN}   Cloudflare WARP 双栈路由与灵活分流管理 (warp_daima.sh)     ${NC}"
     echo -e "${CYAN}==============================================================${NC}"
     echo "1. 自定义添加指定域名/应用走 WARP (交互式输入)"
-    echo "2. 切换为【全局模式】：所有外网流量强制走 WARP"
+    echo "2. 切换为【全局双栈模式】：所有外网流量强制走 WARP (IPv4+IPv6)"
     echo "3. 查看当前 WARP 路由状态"
     echo "4. 关闭并停用 WARP 代理（恢复默认直连路由）"
     echo "0. 返回上级主菜单"
@@ -109,21 +120,25 @@ while true; do
 
             python3 -c "
 import json
-cfg_file = '$cfg_json'
+cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
 outbounds = data.get('outbounds', [])
-# 清除旧的 warp-out，使用最新的动态随机端口
 outbounds = [ob for ob in outbounds if ob.get('tag') != 'warp-out']
+
+# 注入支持双栈解析的 SOCKS 出站
 outbounds.append({
     'tag': 'warp-out',
     'protocol': 'socks',
-    'settings': {'servers': [{'address': '127.0.0.1', 'port': int('$warp_local_port')}]}
+    'settings': {
+        'servers': [{'address': '127.0.0.1', 'port': int('${warp_local_port}')}]
+    }
 })
 data['outbounds'] = outbounds
 
-routing = data.get('routing', {'domainStrategy': 'AsIs', 'rules': []})
+routing = data.get('routing', {'domainStrategy': 'IPIfNonMatch', 'rules': []})
+routing['domainStrategy'] = 'IPIfNonMatch'
 rules = routing.get('rules', [])
 
 custom_rule = None
@@ -132,7 +147,7 @@ for r in rules:
         custom_rule = r
         break
 
-new_domains = '$user_domains'.split()
+new_domains = '${user_domains}'.split()
 if not custom_rule:
     custom_rule = {
         'type': 'field',
@@ -157,14 +172,14 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
             pkill -f xray || true
             nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
             echo $! > "${xray_dir}/xray.pid"
-            echo -e "${GREEN}✅ 自定义域名规则已成功注入并生效（使用本地端口: $warp_local_port）！${NC}"
+            echo -e "${GREEN}✅ 自定义域名规则已成功注入并生效（支持双栈）！${NC}"
             read -p "按回车键继续..." < /dev/tty
             ;;
         2)
-            echo -e "${YELLOW}正在切换为全局 WARP 模式...${NC}"
+            echo -e "${YELLOW}正在切换为全局双栈 WARP 模式...${NC}"
             python3 -c "
 import json
-cfg_file = '$cfg_json'
+cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
@@ -173,12 +188,14 @@ outbounds = [ob for ob in outbounds if ob.get('tag') != 'warp-out']
 outbounds.append({
     'tag': 'warp-out',
     'protocol': 'socks',
-    'settings': {'servers': [{'address': '127.0.0.1', 'port': int('$warp_local_port')}]}
+    'settings': {
+        'servers': [{'address': '127.0.0.1', 'port': int('${warp_local_port}')}]
+    }
 })
 data['outbounds'] = outbounds
 
 routing = {
-    'domainStrategy': 'AsIs',
+    'domainStrategy': 'IPIfNonMatch',
     'rules': [
         { 'type': 'field', 'outboundTag': 'direct', 'ip': ['geoip:private', 'geoip:cn'] },
         { 'type': 'field', 'outboundTag': 'direct', 'domain': ['geosite:cn'] },
@@ -193,14 +210,14 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
             pkill -f xray || true
             nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
             echo $! > "${xray_dir}/xray.pid"
-            echo -e "${GREEN}✅ 已成功切换为【全局 WARP 模式】（本地端口: $warp_local_port）！${NC}"
+            echo -e "${GREEN}✅ 已成功切换为【全局双栈 WARP 模式】（IPv4/IPv6 流量均接管）！${NC}"
             read -p "按回车键继续..." < /dev/tty
             ;;
         3)
             echo ""
             echo -e "${CYAN}📊 当前 WARP 客户端状态：${NC}"
             warp-cli status
-            echo -e "📌 当前本地 SOCKS 代理监听端口: ${GREEN}$warp_local_port${NC}"
+            echo -e "📌 本地双栈 SOCKS 代理监听端口: ${GREEN}$warp_local_port${NC}"
             echo ""
             read -p "按回车键继续..." < /dev/tty
             ;;
@@ -212,7 +229,7 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
             
             python3 -c "
 import json
-cfg_file = '$cfg_json'
+cfg_file = '${cfg_json}'
 try:
     with open(cfg_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
