@@ -5,10 +5,8 @@ YUZHOU_DIR="/etc/yuzhou"
 MODULES_DIR="${YUZHOU_DIR}/modules"
 mkdir -p "$MODULES_DIR"
 
-# 获取当前脚本的绝对路径
 SCRIPT_PATH="$(realpath "$0" 2>/dev/null || echo "$0")"
 
-# 颜色定义
 RED="\033[31m"
 GREEN="\033[32m"
 YELLOW="\033[33m"
@@ -17,11 +15,9 @@ NC="\033[0m"
 
 # ==================== 环境检测函数 ====================
 check_system_info() {
-    # 1. CPU 型号与核心数
     cpu_model=$(awk -F': ' '/model name/ {print $2; exit}' /proc/cpuinfo 2>/dev/null || echo "未知 CPU")
     cores=$(nproc 2>/dev/null || echo "1")
     
-    # 2. CPU 架构与 x86-64 v几代检测
     arch=$(uname -m)
     x86_v_level="非 x86_64 架构"
     if [ "$arch" = "x86_64" ]; then
@@ -45,7 +41,6 @@ check_system_info() {
         fi
     fi
 
-    # 3. 系统版本与内核版本检测
     if [ -f /etc/os-release ]; then
         os_version=$(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2)
     else
@@ -53,7 +48,6 @@ check_system_info() {
     fi
     kernel_version=$(uname -r)
 
-    # 4. IP 四项细分检测 (支持通过本地 WARP SOCKS5 代理检测 WARP 出站)
     local_v4=$(curl -s4 --connect-timeout 2 https://api.ip.sb 2>/dev/null || curl -s4 --connect-timeout 2 https://ipv4.icanhazip.com 2>/dev/null)
     if [ -n "$local_v4" ]; then
         local_v4_status="${GREEN}${local_v4}${NC}"
@@ -93,7 +87,7 @@ check_system_info() {
         warp_v4_status="${YELLOW}未连接/未启用${NC}"
     fi
 
-    # WARP IPv6 出站检测
+    # WARP IPv6 出站检测 (通过代理双栈检测)
     if [ -n "$warp_socks_port" ]; then
         warp_v6=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
     else
@@ -108,10 +102,18 @@ check_system_info() {
         fi
         warp_v6_status="${GREEN}已激活 (${warp_v6_ip:-WARP-SOCKS5: $warp_socks_port})${NC}"
     else
-        warp_v6_status="${YELLOW}未连接/未启用${NC}"
+        if [ -n "$warp_socks_port" ]; then
+            warp_v6_ip=$(curl -s --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
+            if [ -n "$warp_v6_ip" ]; then
+                warp_v6_status="${GREEN}已激活 (${warp_v6_ip})${NC}"
+            else
+                warp_v6_status="${YELLOW}未连接/未启用${NC}"
+            fi
+        else
+            warp_v6_status="${YELLOW}未连接/未启用${NC}"
+        fi
     fi
 
-    # 5. BBR 状态检测
     bbr_result=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}')
     if [ "$bbr_result" = "bbr" ]; then
         bbr_status="${GREEN}已开启 (BBR)${NC}"
@@ -119,7 +121,6 @@ check_system_info() {
         bbr_status="${YELLOW}未开启 ($bbr_result)${NC}"
     fi
 
-    # 6. Xray 状态、版本及路径检测
     xray_path=""
     xray_ver=""
     if [ -f "/opt/suoha/xray/xray" ]; then
@@ -137,7 +138,6 @@ check_system_info() {
         xray_status="${RED}未安装${NC}"
     fi
 
-    # 7. WARP 客户端运行状态检测
     if command -v warp-cli &>/dev/null && systemctl is-active --quiet warp-svc 2>/dev/null; then
         warp_svc_status="${GREEN}已安装并运行${NC}"
     elif command -v warp-cli &>/dev/null; then
@@ -146,7 +146,6 @@ check_system_info() {
         warp_svc_status="${RED}未安装${NC}"
     fi
 
-    # 8. 域名与 Argo 独立检测
     if [ -f "/root/.acme.sh/acme.sh" ] || [ -d "/etc/yuzhou/domain" ]; then
         domain_check_status="${GREEN}已配置/绑定域名${NC}"
     else
@@ -260,4 +259,3 @@ while true; do
             ;;
     esac
 done
-```[cite: 7]
