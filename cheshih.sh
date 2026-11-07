@@ -191,7 +191,7 @@ action_init_security() {
     read -p "按回车键返回主菜单..." < /dev/tty
 }
 
-# 快速梭哈模式 (原版 6 个节点逻辑)
+# 快速梭哈模式 (原版完整 6 个节点逻辑)
 function quicktunnel(){
 mkdir -p /opt/kkk_quick >/dev/null 2>&1
 cd /opt/kkk_quick
@@ -417,7 +417,7 @@ echo "Clash一键:    clash://install-config?url=${clash_online_url}"
 echo "=========================================================="
 }
 
-# 安装服务模式 (原版逻辑占位)
+# 安装服务模式
 function installtunnel(){
 mkdir -p /opt/kkk/ >/dev/null 2>&1
 cd /opt/kkk
@@ -548,7 +548,7 @@ with open('$cfg_json', 'w', encoding='utf-8') as f:
     read -p "按回车键返回..."
 }
 
-# 8. 配置 Cloudflare WARP 灵活路由与分流 (完全恢复您原版的 warp-cli 逻辑)
+# 8. 配置 Cloudflare WARP 灵活路由与分流 (已增加 warp-cli 命令存在性安全检测)
 configure_warp_routing() {
     local cfg_json="/opt/kkk_quick/xray/config.json"
     if [ ! -f "$cfg_json" ]; then
@@ -558,8 +558,10 @@ configure_warp_routing() {
     fi
     
     if ! command -v warp-cli &>/dev/null; then
+        echo "[-] 未检测到 warp-cli 客户端。正在尝试自动安装 cloudflare-warp..."
         apt update && apt install -y cloudflare-warp >/dev/null 2>&1 || true
     fi
+
     systemctl enable --now warp-svc >/dev/null 2>&1
     warp-cli registration new >/dev/null 2>&1 || true
     warp-cli mode proxy >/dev/null 2>&1
@@ -636,12 +638,18 @@ with open('$cfg_json', 'w', encoding='utf-8') as f:
                 ;;
             3)
                 echo ""
-                warp-cli status
+                if command -v warp-cli &>/dev/null; then
+                    warp-cli status
+                else
+                    echo "[-] 未检测到 warp-cli 客户端，无法查询状态。"
+                fi
                 echo ""
                 read -p "按回车键继续..." < /dev/tty
                 ;;
             4)
-                warp-cli disconnect >/dev/null 2>&1 || true
+                if command -v warp-cli &>/dev/null; then
+                    warp-cli disconnect >/dev/null 2>&1 || true
+                fi
                 systemctl stop warp-svc >/dev/null 2>&1 || true
                 echo "✅ WARP 已关闭。"
                 read -p "按回车键继续..." < /dev/tty
@@ -703,7 +711,7 @@ manage_bbr() {
 
 
 # ==============================================================================
-# 5. 主菜单入口及循环分发逻辑 (已修复返回主菜单死循环)
+# 5. 主菜单入口及循环分发逻辑
 # ==============================================================================
 while true; do
     clear
