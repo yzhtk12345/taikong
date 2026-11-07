@@ -71,4 +71,3 @@ manage_cache() {
 }
 
 manage_cache
-```[cite: 12]
