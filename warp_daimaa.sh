@@ -64,10 +64,8 @@ fi
 systemctl enable --now warp-svc >/dev/null 2>&1
 sleep 2
 
-# === 🔥 关键修复：检测并解决 Registration Missing 问题 ===
-echo -e "${YELLOW}正在检查 WARP 注册与连接状态...${NC}"
+# 检测并解决 Registration Missing 问题
 if warp-cli status 2>/dev/null | grep -q "Registration Missing"; then
-    echo -e "${YELLOW}检测到客户端未注册，正在向 Cloudflare 申请注册新设备...${NC}"
     warp-cli registration new >/dev/null 2>&1 || true
     sleep 2
 fi
@@ -76,13 +74,13 @@ warp-cli mode proxy >/dev/null 2>&1
 
 # 3. 动态随机生成本地 SOCKS 端口并检查占用（避开已有占用）
 while true; do
-    warp_local_port=$((RANDOM % 20000 + 30000)) # 在 30000-50000 之间随机
+    warp_local_port=$((RANDOM % 20000 + 30000))
     if ! ss -tlnp | grep -q ":${warp_local_port} " && ! ss -ulnp | grep -q ":${warp_local_port} "; then
         break
     fi
 done
 
-# 设置 warp-cli 本地代理端口并建立连接
+# 设置 warp-cli 本地代理端口并连接
 warp-cli proxy port "$warp_local_port" >/dev/null 2>&1
 warp-cli connect >/dev/null 2>&1
 
@@ -118,7 +116,7 @@ while true; do
 
             python3 -c "
 import json
-cfg_file = '$cfg_json'
+cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
@@ -127,7 +125,7 @@ outbounds = [ob for ob in outbounds if ob.get('tag') != 'warp-out']
 outbounds.append({
     'tag': 'warp-out',
     'protocol': 'socks',
-    'settings': {'servers': [{'address': '127.0.0.1', 'port': int('$warp_local_port')}]}
+    'settings': {'servers': [{'address': '127.0.0.1', 'port': int('${warp_local_port}')}]}
 })
 data['outbounds'] = outbounds
 
@@ -140,7 +138,7 @@ for r in rules:
         custom_rule = r
         break
 
-new_domains = '$user_domains'.split()
+new_domains = '${user_domains}'.split()
 if not custom_rule:
     custom_rule = {
         'type': 'field',
@@ -172,7 +170,7 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
             echo -e "${YELLOW}正在切换为全局 WARP 模式...${NC}"
             python3 -c "
 import json
-cfg_file = '$cfg_json'
+cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
@@ -181,7 +179,7 @@ outbounds = [ob for ob in outbounds if ob.get('tag') != 'warp-out']
 outbounds.append({
     'tag': 'warp-out',
     'protocol': 'socks',
-    'settings': {'servers': [{'address': '127.0.0.1', 'port': int('$warp_local_port')}]}
+    'settings': {'servers': [{'address': '127.0.0.1', 'port': int('${warp_local_port}')}]}
 })
 data['outbounds'] = outbounds
 
@@ -220,13 +218,13 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
             
             python3 -c "
 import json
-cfg_file = '$cfg_json'
+cfg_file = '${cfg_json}'
 try:
     with open(cfg_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
     
     if 'outbounds' in data:
-        data['outbounds'] = [ob for ob in data['outbounds'] if ob.get('tag'] != 'warp-out']
+        data['outbounds'] = [ob for ob in data['outbounds'] if ob.get('tag') != 'warp-out']
     
     if 'routing' in data and 'rules' in data['routing']:
         clean_rules = []
@@ -260,9 +258,3 @@ except Exception as e:
             ;;
     esac
 done
-```[cite: 6]
-
-### 💡 接下来您可以直接这样验证：
-1. 重新运行修改后的 `warp_daima.sh`，脚本会自动完成设备注册并连接。
-2. 在菜单中选择 **3（查看当前 WARP 路由状态）**，此时应能看到状态变为 `Connected`。
-3. 选择 **2（切换为全局模式）** 后，除了中国大陆的流量和内网直连外，其余外网出站就会自动通过 WARP 代理转发[cite: 6]。
