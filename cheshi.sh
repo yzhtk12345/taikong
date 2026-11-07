@@ -122,17 +122,20 @@ check_system_info() {
         warp_svc_status="${RED}未安装${NC}"
     fi
 
-    # 8. 域名与 Argo 独立检测
+    # 8. 域名与 Argo 独立检测（已优化：优先检测后台运行进程/服务，兼容临时与固定隧道）
     if [ -f "/root/.acme.sh/acme.sh" ] || [ -d "/etc/yuzhou/domain" ]; then
         domain_check_status="${GREEN}已配置/绑定域名${NC}"
     else
         domain_check_status="${YELLOW}未绑定自定义域名${NC}"
     fi
 
-    if [ -f "/root/.cloudflared/cert.pem" ] || [ -d "/root/.cloudflared" ] && [ "$(ls -A /root/.cloudflared 2>/dev/null)" ]; then
+    argo_pid=$(pgrep -f "cloudflared" 2>/dev/null)
+    if [ -n "$argo_pid" ] || systemctl is-active --quiet cloudflared.service 2>/dev/null || systemctl is-active --quiet suoha-quick.service 2>/dev/null; then
+        argo_check_status="${GREEN}已运行 (Argo隧道活跃)${NC}"
+    elif [ -f "/root/.cloudflared/cert.pem" ] || ([ -d "/root/.cloudflared" ] && [ "$(ls -A /root/.cloudflared 2>/dev/null)" ]); then
         argo_check_status="${GREEN}已授权/有Argo缓存${NC}"
     else
-        argo_check_status="${YELLOW}未检测到Argo隧道授权${NC}"
+        argo_check_status="${YELLOW}未运行/未授权${NC}"
     fi
 }
 
