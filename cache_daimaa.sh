@@ -15,8 +15,8 @@ NC="\033[0m"
 _clear_cache() {
     echo -e "${YELLOW}正在清理临时进程与缓存文件...${NC}"
     
-    if [ $(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}') == "Alpine" ]
-    then
+    os_name=$(grep -i PRETTY_NAME /etc/os-release 2>/dev/null | cut -d '"' -f2 | awk '{print $1}')
+    if [ "$os_name" == "Alpine" ]; then
         kill -9 $(ps -ef | grep xray | grep -v grep | awk '{print $1}') >/dev/null 2>&1
         kill -9 $(ps -ef | grep cloudflared-linux | grep -v grep | awk '{print $1}') >/dev/null 2>&1
     else
@@ -34,7 +34,7 @@ _clear_cache() {
 
 # 清空缓存管理菜单
 manage_cache() {
-    if [ $EUID -ne 0 ]; then
+    if [ "$EUID" -ne 0 ]; then
        echo -e "${RED}❌ 错误：请使用 root 权限运行此功能！${NC}"
        return 1
     fi
@@ -47,13 +47,13 @@ manage_cache() {
         echo "1. 确认清空临时运行缓存与节点文件"
         echo "0. 返回上一级菜单"
         echo -e "${CYAN}========================================${NC}"
-        read -p "请输入选项 [1, 0]: " sub_choice < /dev/tty
+        read -p "请输入选项 [1, 0]: " sub_choice
         
         case "$sub_choice" in
             1)
                 echo ""
                 _clear_cache
-                read -p "按回车键继续..." < /dev/tty
+                read -p "按回者键继续..."
                 ;;
             0)
                 break
@@ -67,4 +67,4 @@ manage_cache() {
 }
 
 manage_cache
-```[cite: 9]
+```[cite: 12]
