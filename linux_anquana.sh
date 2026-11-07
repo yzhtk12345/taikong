@@ -18,12 +18,46 @@ current_port=$(ss -tlnp | grep -E 'sshd|dropbear' | awk '{print $4}' | awk -F':'
 [ -z "$current_port" ] && current_port=$(grep -i "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
 [ -z "$current_port" ] && current_port="22"
 
-root_login_status=$(grep -i "^PermitRootLogin" /etc/ssh/sshd_config 2>/dev/null)
+# 检查 Root 登录状态并转换为中文含义
+raw_root_login=$(grep -i "^PermitRootLogin" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+if [[ "$raw_root_login" =~ ^([nN][oO]|false|without-password|prohibit-password)$ ]]; then
+    root_login_desc="${GREEN}已禁用 (安全)${NC}"
+elif [[ "$raw_root_login" =~ ^([yY][eE][sS]|true)$ ]]; then
+    root_login_desc="${RED}允许登录 (存在风险)${NC}"
+else
+    root_login_desc="${YELLOW}未明确配置 (默认由系统决定)${NC}"
+fi
+
+# 检查当前系统防火墙安装与运行状态
+fw_status="无"
+fw_name="未安装"
+if command -v ufw &>/dev/null; then
+    fw_status="有"
+    if systemctl is-active --quiet ufw 2>/dev/null; then
+        fw_name="${GREEN}UFW (已运行)${NC}"
+    else
+        fw_name="${YELLOW}UFW (未运行)${NC}"
+    fi
+elif command -v firewall-cmd &>/dev/null; then
+    fw_status="有"
+    if systemctl is-active --quiet firewalld 2>/dev/null; then
+        fw_name="${GREEN}Firewalld (已运行)${NC}"
+    else
+        fw_name="${YELLOW}Firewalld (未运行)${NC}"
+    fi
+elif command -v iptables &>/dev/null; then
+    fw_status="有"
+    fw_name="${YELLOW}iptables${NC}"
+else
+    fw_status="${RED}无${NC}"
+    fw_name="未检测到标准防火墙"
+fi
 
 echo -e " 🖥️  当前主机名   : ${current_host}"
 echo -e " 👤 当前用户     : ${current_user}"
 echo -e " 🔌 当前 SSH 端口: ${current_port}"
-echo -e " 🔒 Root 登录状态: ${root_login_status:-未明确配置(默认)} "
+echo -e " 🔒 Root 登录状态: ${root_login_desc}"
+echo -e " 🛡️  防火墙状态   : ${fw_status} (类型: ${fw_name})"
 echo -e "${CYAN}--------------------------------------------------------------${NC}"
 
 # 检查系统发行版类型
@@ -77,7 +111,7 @@ else
 fi
 echo -e "${GREEN}[+] 用户 '$new_user' 创建成功并已赋予管理员权限！${NC}\n"
 
-# 4. 设置 SSH 端口 (3000-10000 随机，带端口占用检测)
+# 4. 设置 SSH 端口 (3000-10000 随机，占用时提示但允许强制使用)
 while true; do
     random_port=$((RANDOM % 7001 + 3000))
     read -p "请输入新的 SSH 端口 (3000-10000，直接回车随机生成 [$random_port]): " new_port < /dev/tty
@@ -92,8 +126,15 @@ while true; do
 
     # 检查端口是否被占用
     if ss -tuln | grep -q ":$new_port " || netstat -tuln 2>/dev/null | grep -q ":$new_port "; then
-        echo -e "${RED}[-] 端口 $new_port 当前已被占用，请更换其他端口或直接回车重新随机！${NC}"
-        continue
+        echo -e "${YELLOW}[!] 警告：检测到端口 $new_port 当前已被占用！${NC}"
+        read -p "该端口已被占用，是否仍要强制使用它？[y/N]: " force_use < /dev/tty
+        if [[ "$force_use" =~ ^[yY]$ ]]; then
+            echo -e "${YELLOW}[+] 已选择强制使用被占用端口: $new_port${NC}"
+            break
+        else
+            echo -e "${CYAN}请重新选择端口。${NC}"
+            continue
+        fi
     else
         echo -e "${GREEN}[+] 端口 $new_port 可用。${NC}"
         break
@@ -122,7 +163,7 @@ if sshd -t; then
     elif systemctl list-units --full -all | grep -q "sshd.service"; then
         systemctl restart sshd
     fi
-    echo -e "${GREEN}[√] SSH 配置修改成功 (端口: $new_port, 已禁用 Root 远程登录)${NC}\n"
+    echo -e "${GREEN}[√] SSH 配置修改成功 (端口: $new_port, Root 远程登录已禁用)${NC}\n"
 else
     echo -e "${RED}[-] 错误：SSH 配置语法检查未通过，已自动恢复备份！${NC}"
     cp "${sshd_config}.bak_"* "$sshd_config"
@@ -174,7 +215,7 @@ echo -e "==============================================================="
 echo -e " - 新主机名     : ${new_host}"
 echo -e " - 新用户名     : ${new_user}"
 echo -e " - 新 SSH 端口  : ${new_port}"
-echo -e " - Root 远程登录: 已禁用"
+echo -e " - Root 远程登录: 已禁用 (安全)"
 echo -e "---------------------------------------------------------------"
 echo -e " ${RED}【警告】请务必另开一个终端窗口，使用新用户和新端口测试登录成功${NC}"
 echo -e " ${RED}        后再关闭当前窗口，切勿直接退出当前会话！${NC}"
