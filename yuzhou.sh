@@ -69,41 +69,28 @@ check_system_info() {
     warp_socks_port=""
     [ -f "${YUZHOU_DIR}/last_warp_port.txt" ] && warp_socks_port=$(cat "${YUZHOU_DIR}/last_warp_port.txt" 2>/dev/null | tr -d '\n\r ')
 
-    # WARP IPv4 出站检测
+    # WARP IPv4 出站检测（通过本地 SOCKS5 代理检测真实出口 IP）
+    warp_v4_ip=""
     if [ -n "$warp_socks_port" ]; then
-        warp_v4=$(curl -s4 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
-    else
-        warp_v4=$(curl -s4 --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
+        warp_v4_ip=$(curl -s4 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api.ip.sb 2>/dev/null)
+        [ -z "$warp_v4_ip" ] && warp_v4_ip=$(curl -s4 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://ipv4.icanhazip.com 2>/dev/null)
     fi
 
-    if [ -n "$warp_v4" ]; then
-        if [ -n "$warp_socks_port" ]; then
-            warp_v4_ip=$(curl -s4 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api.ip.sb 2>/dev/null)
-        else
-            warp_v4_ip=$(curl -s4 --connect-timeout 2 https://api.ip.sb 2>/dev/null)
-        fi
-        warp_v4_status="${GREEN}已激活 (${warp_v4_ip:-WARP-SOCKS5: $warp_socks_port})${NC}"
+    if [ -n "$warp_v4_ip" ]; then
+        warp_v4_status="${GREEN}已激活 (${warp_v4_ip})${NC}"
     else
         warp_v4_status="${YELLOW}未连接/未启用${NC}"
     fi
 
-    # WARP IPv6 出站检测
-    warp_v6=""
+    # WARP IPv6 出站检测（通过本地 SOCKS5 代理检测真实出口 IPv6）
     warp_v6_ip=""
     if [ -n "$warp_socks_port" ]; then
-        warp_v6=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
-        if [ -z "$warp_v6" ]; then
-            warp_v6_ip=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api6.ip.sb 2>/dev/null || curl -s --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://v6.ident.me 2>/dev/null)
-        else
-            warp_v6_ip=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
-        fi
-    else
-        warp_v6=$(curl -s6 --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
-        [ -n "$warp_v6" ] && warp_v6_ip=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
+        warp_v6_ip=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
+        [ -z "$warp_v6_ip" ] && warp_v6_ip=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://v6.ident.me 2>/dev/null)
     fi
 
-    if [ -n "$warp_v6_ip" ] || [ -n "$warp_v6" ]; then
-        warp_v6_status="${GREEN}已激活 (${warp_v6_ip:-WARP-IPv6-Active})${NC}"
+    if [ -n "$warp_v6_ip" ]; then
+        warp_v6_status="${GREEN}已激活 (${warp_v6_ip})${NC}"
     else
         warp_v6_status="${YELLOW}未连接/未启用${NC}"
     fi
@@ -142,7 +129,6 @@ check_system_info() {
         warp_svc_status="${RED}未安装${NC}"
     fi
 
-    # 🔗 已更新：准确检查 /etc/yuzhou/yuming/ 下是否存在真实证书
     if [ -f "${YUZHOU_DIR}/yuming/cert.crt" ] && [ -f "${YUZHOU_DIR}/yuming/private.key" ]; then
         domain_check_status="${GREEN}已配置/绑定域名${NC}"
     else
