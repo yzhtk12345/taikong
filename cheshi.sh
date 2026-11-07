@@ -211,7 +211,7 @@ while true; do
             read -p "按回车返回..."
             ;;
         7)
-            echo "正在执行第 7 项: Hysteria 2 部署..."
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/hy2_jiedian.sh)
             read -p "按回车返回..."
             ;;
         8)
