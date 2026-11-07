@@ -45,7 +45,7 @@ if ! command -v warp-cli &>/dev/null; then
     mkdir -p /usr/share/keyrings
 
     if ! curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o /usr/share/keyrings/cloudflare-warp-archive-keyring.asc; then
-        echo -e "${RED}[错误] 不能下载 Cloudflare GPG 密钥！${NC}"
+        echo -e "${RED}[错误] 无法下载 Cloudflare GPG 密钥！${NC}"
         read -p "按回车键返回..." < /dev/tty
         exit 1
     fi
@@ -60,22 +60,17 @@ if ! command -v warp-cli &>/dev/null; then
 fi
 
 systemctl enable --now warp-svc >/dev/null 2>&1
+sleep 2
 
-# 循环等待 warp-svc 守护进程完全启动就绪
-echo -e "${CYAN}正在等待 WARP 守护进程启动并就绪...${NC}"
-for i in {1..10}; do
-    if warp-cli status &>/dev/null; then
-        break
-    fi
-    sleep 1
-done
+# 强力重置并初始化 WARP 状态，确保成功拨号
+echo -e "${CYAN}正在初始化并连接 Cloudflare WARP 官方客户端...${NC}"
+warp-cli disconnect >/dev/null 2>&1 || true
+warp-cli delete >/dev/null 2>&1 || true
+sleep 1
 
-# 自动处理注册与协议接受
 warp-cli registration new >/dev/null 2>&1 || true
 sleep 1
 warp-cli accept-tos >/dev/null 2>&1 || true
-
-# 配置双栈及代理模式并连接
 warp-cli mode proxy >/dev/null 2>&1
 warp-cli tunnel ip set-dual-stack >/dev/null 2>&1 || true
 
@@ -89,7 +84,14 @@ done
 
 warp-cli proxy port "$warp_local_port" >/dev/null 2>&1
 warp-cli connect >/dev/null 2>&1
-sleep 2
+
+# 循环等待最多 8 秒，直到 warp-cli 真正连接成功
+for i in {1..8}; do
+    if warp-cli status 2>/dev/null | grep -q "Connected"; then
+        break
+    fi
+    sleep 1
+done
 
 echo -e "${GREEN}✅ WARP 双栈本地代理端口已成功分配并启动: ${CYAN}$warp_local_port${NC}"
 echo "$warp_local_port" > "$LAST_WARP_PORT_FILE"
@@ -102,7 +104,7 @@ while true; do
     echo -e "${CYAN}==============================================================${NC}"
     echo "1. 自定义添加指定域名/应用走 WARP (交互式输入)"
     echo "2. 切换为【全局双栈模式】：所有外网流量强制走 WARP (IPv4+IPv6)"
-    echo "3. 查看当前 WARP 路由状态"
+    echo "3. 查看当前 WARP 路由状态与出口 IP"
     echo "4. 关闭并停用 WARP 代理（恢复默认直连路由）"
     echo "0. 返回上级主菜单"
     echo -e "${CYAN}==============================================================${NC}"
@@ -175,7 +177,10 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
     json.dump(data, f, indent=4, ensure_ascii=False)
 "
             pkill -f xray || true
-            nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
+            # 兼容多路径启动
+            xray_bin_path="${xray_dir}/xray/xray"
+            [ ! -f "$xray_bin_path" ] && xray_bin_path="${xray_dir}/xray"
+            nohup "$xray_bin_path" run -config "$cfg_json" >/dev/null 2>&1 &
             echo $! > "${xray_dir}/xray.pid"
             echo -e "${GREEN}✅ 自定义域名规则已成功注入并生效（使用本地端口: $warp_local_port）！${NC}"
             read -p "按回车键继续..." < /dev/tty
@@ -203,7 +208,7 @@ outbounds.append({
 outbounds.append({'tag': 'direct', 'protocol': 'freedom', 'settings': {}})
 data['outbounds'] = outbounds
 
-# 修复全局模式路由：确保定义了直连 tag 并安全分流
+# 修复全局模式路由：安全放行本地环回与局域网，其余全部走 warp-out
 routing = {
     'domainStrategy': 'IPIfNonMatch',
     'rules': [
@@ -218,7 +223,9 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
     json.dump(data, f, indent=4, ensure_ascii=False)
 "
             pkill -f xray || true
-            nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
+            xray_bin_path="${xray_dir}/xray/xray"
+            [ ! -f "$xray_bin_path" ] && xray_bin_path="${xray_dir}/xray"
+            nohup "$xray_bin_path" run -config "$cfg_json" >/dev/null 2>&1 &
             echo $! > "${xray_dir}/xray.pid"
             echo -e "${GREEN}✅ 已成功切换为【全局双栈 WARP 模式】（本地端口: $warp_local_port）！${NC}"
             read -p "按回车键继续..." < /dev/tty
@@ -228,6 +235,8 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
             echo -e "${CYAN}📊 当前 WARP 客户端状态：${NC}"
             warp-cli status
             echo -e "📌 当前本地 SOCKS 代理监听端口: ${GREEN}$warp_local_port${NC}"
+            echo -e "🔍 测试通过 WARP 的出口 IPv4: ${GREEN}$(curl -s4 --socks5 127.0.0.1:"$warp_local_port" https://api.ip.sb 2>/dev/null || echo "获取失败")${NC}"
+            echo -e "🔍 测试通过 WARP 的出口 IPv6: ${GREEN}$(curl -s6 --socks5 127.0.0.1:"$warp_local_port" https://api6.ip.sb 2>/dev/null || echo "获取失败")${NC}"
             echo ""
             read -p "按回车键继续..." < /dev/tty
             ;;
@@ -266,7 +275,9 @@ except Exception as e:
     print(f'Error: {e}')
 "
             pkill -f xray || true
-            nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
+            xray_bin_path="${xray_dir}/xray/xray"
+            [ ! -f "$xray_bin_path" ] && xray_bin_path="${xray_dir}/xray"
+            nohup "$xray_bin_path" run -config "$cfg_json" >/dev/null 2>&1 &
             echo $! > "${xray_dir}/xray.pid"
 
             echo -e "${GREEN}✅ WARP 已成功关闭，Xray 路由已完全恢复为纯净直连状态！${NC}"
