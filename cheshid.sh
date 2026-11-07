@@ -109,7 +109,6 @@ function sync_to_static_web(){
     
     mkdir -p "$static_dir" "$secure_web_dir" >/dev/null 2>&1
 
-    # 重新生成 Base64 订阅文件
     if [ -f "${src_dir}/nodes.txt" ]; then
         if [ $(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2 | awk '{print $1}') == "Alpine" ]; then
             base64 "${src_dir}/nodes.txt" | tr -d '\n' > "${src_dir}/sub.txt"
@@ -118,7 +117,6 @@ function sync_to_static_web(){
         fi
     fi
 
-    # 同步到根静态目录与安全Token目录
     [ -f "${src_dir}/nodes.txt" ] && cp -f "${src_dir}/nodes.txt" "${static_dir}/nodes.txt" && cp -f "${src_dir}/nodes.txt" "${secure_web_dir}/nodes.txt"
     [ -f "${src_dir}/sub.txt" ] && cp -f "${src_dir}/sub.txt" "${static_dir}/sub.txt" && cp -f "${src_dir}/sub.txt" "${secure_web_dir}/sub.txt"
     [ -f "${src_dir}/clash.yaml" ] && cp -f "${src_dir}/clash.yaml" "${static_dir}/clash.yaml" && cp -f "${src_dir}/clash.yaml" "${secure_web_dir}/clash.yaml"
@@ -126,26 +124,29 @@ function sync_to_static_web(){
 
 
 # ==============================================================================
-# 3. 核心节点部署与安全配置模块
+# 3. 核心节点部署与安全配置模块 (已恢复主机名随机生成)
 # ==============================================================================
 
 action_init_security() {
     echo "===================================="
     echo "  开始执行：系统初始化与安全加固"
     echo "===================================="
+    
+    # 恢复主机名随机生成支持
     local current_hostname=$(hostname)
-
-    read -p "请输入新的主机名 (回车保持当前 [$current_hostname]): " NEW_HOSTNAME < /dev/tty
-    if [ -n "$NEW_HOSTNAME" ]; then
-        hostnamectl set-hostname "$NEW_HOSTNAME"
-        echo "[+] 主机名已成功修改为: $NEW_HOSTNAME"
-    else
-        echo "[+] 保持当前主机名不变: $current_hostname"
+    local random_host="vps-$(tr -dc 'a-z0-9' < /dev/urandom | head -c 4)"
+    
+    read -p "请输入新的主机名 (直接回车将随机生成 [$random_host]): " NEW_HOSTNAME < /dev/tty
+    if [ -z "$NEW_HOSTNAME" ]; then
+        NEW_HOSTNAME="$random_host"
+        echo "[+] 已自动随机生成主机名: $NEW_HOSTNAME"
     fi
+    hostnamectl set-hostname "$NEW_HOSTNAME"
+    echo "[+] 主机名已成功修改为: $NEW_HOSTNAME"
 
     RANDOM_USER="user_$(tr -dc 'a-z0-9' < /dev/urandom | head -c 4)"
     while true; do
-        read -p "请输入要创建的新用户名 (直接回车随机生成 [$RANDOM_USER]): " NEW_USER < /dev/tty
+        read -p "请输入要创建的新用户名 (直接回车将随机生成 [$RANDOM_USER]): " NEW_USER < /dev/tty
         if [ -z "$NEW_USER" ]; then
             NEW_USER="$RANDOM_USER"
             echo "[+] 已自动随机生成用户名: $NEW_USER"
@@ -260,7 +261,7 @@ done
 clear
 
 node_tag=$(echo $isp | sed -e 's/_/%20/g' -e 's/,/%2C/g')
-[ -z "$node_tag" || "$node_tag" == "--" ] && node_tag="Argo_Node"
+[[ -z "$node_tag" || "$node_tag" == "--" ]] && node_tag="Argo_Node"
 
 opt_domains=("cf.090227.xyz" "cloudflare.182682.xyz")
 opt_labels=("优选cf.090227" "优选182682")
@@ -329,7 +330,7 @@ rm -rf xray cloudflared-linux xray.zip
 
 
 # ==============================================================================
-# 4. 额外功能模块 (6. IPv6 SS, 7. Hy2, 8. WARP分流, 9. BBR加速 —— 已修复订阅同步与提示)
+# 4. 额外功能模块 (6. IPv6 SS, 7. Hy2, 8. WARP分流, 9. BBR加速)
 # ==============================================================================
 
 # 6. 额外增加 IPv6 Shadowsocks 直连节点
@@ -384,7 +385,6 @@ with open('$cfg_json', 'w', encoding='utf-8') as f:
     local ss_base64=$(echo -n "$ss_user_info" | base64 -w 0 2>/dev/null || echo -n "$ss_user_info" | base64 | tr -d '\n')
     local ss_link="ss://${ss_base64}@[${ipv6_addr}]:${ss_port}#IPv6-SS-Direct"
 
-    # 追加写入 nodes.txt 并触发全局同步（同时更新 sub.txt 和安全 Token 目录）
     echo "$ss_link" >> "${xray_dir}/nodes.txt"
     sync_to_static_web "$xray_dir"
 
