@@ -82,11 +82,11 @@ check_system_info() {
         warp_v4_status="${YELLOW}未连接/未启用${NC}"
     fi
 
-    # WARP IPv6 出站检测（通过本地 SOCKS5 代理检测真实出口 IPv6）
+    # WARP IPv6 出站检测（通过本地 SOCKS5 代理请求 IPv6 测速接口，支持纯 IPv4 VPS 穿透获取）
     warp_v6_ip=""
     if [ -n "$warp_socks_port" ]; then
-        warp_v6_ip=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
-        [ -z "$warp_v6_ip" ] && warp_v6_ip=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://v6.ident.me 2>/dev/null)
+        warp_v6_ip=$(curl -s --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
+        [ -z "$warp_v6_ip" ] && warp_v6_ip=$(curl -s --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://ipv6.icanhazip.com 2>/dev/null)
     fi
 
     if [ -n "$warp_v6_ip" ]; then
