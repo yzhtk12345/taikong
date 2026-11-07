@@ -87,32 +87,25 @@ check_system_info() {
         warp_v4_status="${YELLOW}未连接/未启用${NC}"
     fi
 
-    # WARP IPv6 出站检测 (通过代理双栈检测，如直连v6失败则通过SOCKS代理获取Cloudflare IPv6出口)
+    # WARP IPv6 出站检测 (双重备用节点检测与降级兼容)
+    warp_v6=""
+    warp_v6_ip=""
     if [ -n "$warp_socks_port" ]; then
         warp_v6=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
+        if [ -z "$warp_v6" ]; then
+            warp_v6_ip=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api6.ip.sb 2>/dev/null || curl -s --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://v6.ident.me 2>/dev/null)
+        else
+            warp_v6_ip=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
+        fi
     else
         warp_v6=$(curl -s6 --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
+        [ -n "$warp_v6" ] && warp_v6_ip=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
     fi
 
-    if [ -n "$warp_v6" ]; then
-        if [ -n "$warp_socks_port" ]; then
-            warp_v6_ip=$(curl -s6 --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
-        else
-            warp_v6_ip=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
-        fi
-        warp_v6_status="${GREEN}已激活 (${warp_v6_ip:-WARP-SOCKS5: $warp_socks_port})${NC}"
+    if [ -n "$warp_v6_ip" ] || [ -n "$warp_v6" ]; then
+        warp_v6_status="${GREEN}已激活 (${warp_v6_ip:-WARP-IPv6-Active})${NC}"
     else
-        if [ -n "$warp_socks_port" ]; then
-            # 兼容纯IPv4小鸡通过SOCKS5获取Cloudflare双栈IP
-            warp_v6_ip=$(curl -s --socks5 127.0.0.1:"$warp_socks_port" --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
-            if [ -n "$warp_v6_ip" ]; then
-                warp_v6_status="${GREEN}已激活 (${warp_v6_ip})${NC}"
-            else
-                warp_v6_status="${YELLOW}未连接/未启用${NC}"
-            fi
-        else
-            warp_v6_status="${YELLOW}未连接/未启用${NC}"
-        fi
+        warp_v6_status="${YELLOW}未连接/未启用${NC}"
     fi
 
     bbr_result=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}')
@@ -122,7 +115,7 @@ check_system_info() {
         bbr_status="${YELLOW}未开启 ($bbr_result)${NC}"
     fi
 
-    # 修正：完美对齐 /etc/yuzhou/ 下的 Xray 真实安装路径
+    # 完美对齐 /etc/yuzhou/ 下的 Xray 安装路径
     xray_path=""
     xray_ver=""
     if [ -f "${YUZHOU_DIR}/quick/xray/xray" ]; then
@@ -177,19 +170,19 @@ show_menu() {
     echo -e " 🖥️  CPU 型号     : $cpu_model"
     echo -e " ⚙️  CPU 核心数   : $cores 核心"
     echo -e " 🏗️  CPU 架构     : $arch ($x86_v_level)"
-    echo -e " 📦 系统版本     : $os_version"
-    echo -e " 🐧 系统内核     : $kernel_version"
-    echo -e " 🌐 本地 IPv4   : $local_v4_status"
-    echo -e " 🌐 本地 IPv6   : $local_v6_status"
-    echo -e " 🛡️  WARP 出站v4 : $warp_v4_status"
-    echo -e " 🛡️  WARP 出站v6 : $warp_v6_status"
-    echo -e " 🚀 BBR 加速    : $bbr_status"
-    echo -e " 📦 Xray 状态   : $xray_status"
-    echo -e " ☁️  WARP 客户端 : $warp_svc_status"
-    echo -e " 🏷️  域名状态    : $domain_check_status"
-    echo -e " 🚇 Argo 状态   : $argo_check_status"
-    echo -e " 📂 脚本主目录   : ${GREEN}${YUZHOU_DIR}${NC}"
-    echo -e " 📁 当前脚本位置 : ${GREEN}${SCRIPT_PATH}${NC}"
+    echo -e " 📦  系统版本     : $os_version"
+    echo -e " 🐧  系统内核     : $kernel_version"
+    echo -e " 🌐  本地 IPv4    : $local_v4_status"
+    echo -e " 🌐  本地 IPv6    : $local_v6_status"
+    echo -e " ☁️  WARP 客户端  : $warp_svc_status"
+    echo -e " 🛡️  WARP 出站v4  : $warp_v4_status"
+    echo -e " 🛡️  WARP 出站v6  : $warp_v6_status"
+    echo -e " 🚀  BBR 加速     : $bbr_status"
+    echo -e " 📦  Xray 状态    : $xray_status"
+    echo -e " 🚇  Argo 状态    : $argo_check_status"
+    echo -e " 🏷️  域名状态      : $domain_check_status"
+    echo -e " 📂  脚本主目录    : ${GREEN}${YUZHOU_DIR}${NC}"
+    echo -e " 📁  当前脚本位置  : ${GREEN}${SCRIPT_PATH}${NC}"
     echo -e "${CYAN}--------------------------------------------------------------${NC}"
     echo -e " 1. 加固 VPS 主机系统 (修改端口/用户/禁用Root/安装防火墙)"
     echo -e " 2. 梭哈模式 (自动生成 VLESS + Trojan 443 优选节点)"
