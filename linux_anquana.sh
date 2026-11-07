@@ -173,6 +173,7 @@ fi
 
 # 6. 防火墙检查、清理与配置
 echo -e "${CYAN}正在检查并配置防火墙...${NC}"
+final_fw_desc=""
 if [ "$OS_FAMILY" = "debian" ]; then
     if systemctl is-active --quiet firewalld 2>/dev/null || dpkg -l | grep -q firewalld; then
         echo -e "${YELLOW}[!] 检测到冲突的 firewalld，正在卸载...${NC}"
@@ -189,6 +190,7 @@ if [ "$OS_FAMILY" = "debian" ]; then
     systemctl enable --now ufw >/dev/null 2>&1
     ufw --force enable >/dev/null 2>&1
     ufw allow "$new_port"/tcp comment 'SSH Port' >/dev/null 2>&1
+    final_fw_desc="有 (UFW 已启用并开放端口 $new_port, 带备注)"
     echo -e "${GREEN}[√] UFW 防火墙已安装并启用，已成功开放端口 $new_port (带备注)${NC}"
 
 elif [ "$OS_FAMILY" = "rhel" ]; then
@@ -206,6 +208,7 @@ elif [ "$OS_FAMILY" = "rhel" ]; then
     systemctl enable --now firewalld >/dev/null 2>&1
     firewall-cmd --permanent --add-port="$new_port"/tcp >/dev/null 2>&1
     firewall-cmd --reload >/dev/null 2>&1
+    final_fw_desc="有 (Firewalld 已运行并开放端口 $new_port)"
     echo -e "${GREEN}[√] Firewalld 防火墙已安装并运行，已成功开放端口 $new_port${NC}"
 fi
 
@@ -216,6 +219,7 @@ echo -e " - 新主机名     : ${new_host}"
 echo -e " - 新用户名     : ${new_user}"
 echo -e " - 新 SSH 端口  : ${new_port}"
 echo -e " - Root 远程登录: 已禁用 (安全)"
+echo -e " - 防火墙状态   : ${final_fw_desc:-有}"
 echo -e "---------------------------------------------------------------"
 echo -e " ${RED}【警告】请务必另开一个终端窗口，使用新用户和新端口测试登录成功${NC}"
 echo -e " ${RED}        后再关闭当前窗口，切勿直接退出当前会话！${NC}"
