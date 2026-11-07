@@ -128,6 +128,10 @@ cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
+# 确保保留原有的 inbounds，绝对不覆盖删除节点入站
+if 'inbounds' not in data:
+    data['inbounds'] = []
+
 outbounds = data.get('outbounds', [])
 outbounds = [ob for ob in outbounds if ob.get('tag') != 'warp-out']
 outbounds.append({
@@ -137,6 +141,9 @@ outbounds.append({
         'servers': [{'address': '127.0.0.1', 'port': int('${warp_local_port}')}]
     }
 })
+# 确保存在 freedom 直连出站
+if not any(ob.get('protocol') == 'freedom' for ob in outbounds):
+    outbounds.append({'protocol': 'freedom', 'settings': {}})
 data['outbounds'] = outbounds
 
 routing = data.get('routing', {'domainStrategy': 'IPIfNonMatch', 'rules': []})
@@ -185,6 +192,10 @@ cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
+# 确保保留原有的 inbounds，绝对不覆盖删除节点入站
+if 'inbounds' not in data:
+    data['inbounds'] = []
+
 outbounds = data.get('outbounds', [])
 outbounds = [ob for ob in outbounds if ob.get('tag') != 'warp-out']
 outbounds.append({
@@ -194,6 +205,8 @@ outbounds.append({
         'servers': [{'address': '127.0.0.1', 'port': int('${warp_local_port}')}]
     }
 })
+if not any(ob.get('protocol') == 'freedom' for ob in outbounds):
+    outbounds.append({'protocol': 'freedom', 'settings': {}})
 data['outbounds'] = outbounds
 
 routing = {
@@ -237,7 +250,7 @@ try:
         data = json.load(f)
     
     if 'outbounds' in data:
-        data['outbounds'] = [ob for ob in data['outbounds'] if ob.get('tag') != 'warp-out']
+        data['outbounds'] = [ob for ob in data['outbounds'] if ob.get('tag'] != 'warp-out']
     
     if 'routing' in data and 'rules' in data['routing']:
         clean_rules = []
