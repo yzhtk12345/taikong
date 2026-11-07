@@ -45,21 +45,35 @@ check_system_info() {
         fi
     fi
 
-    # 3. IP 四项细分检测 (本地v4, 本地v6, WARP出站v4, WARP出站v6)
-    local_v4=$(curl -s4 --connect-timeout 2 https://api.ip.sb 2>/dev/null)
+    # 3. 系统版本与内核版本检测
+    if [ -f /etc/os-release ]; then
+        os_version=$(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2)
+    else
+        os_version="未知系统"
+    }
+    kernel_version=$(uname -r)
+
+    # 4. IP 四项细分检测 (优化 IPv6 获取逻辑，兼容 API 与本地网卡)
+    # 本地 IPv4
+    local_v4=$(curl -s4 --connect-timeout 2 https://api.ip.sb 2>/dev/null || curl -s4 --connect-timeout 2 https://ipv4.icanhazip.com 2>/dev/null)
     if [ -n "$local_v4" ]; then
         local_v4_status="${GREEN}${local_v4}${NC}"
     else
         local_v4_status="${RED}无 (未检测到本地IPv4)${NC}"
     fi
 
-    local_v6=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
+    # 本地 IPv6 (多源获取 + 本地 fallback)
+    local_v6=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null || curl -s6 --connect-timeout 2 https://ipv6.icanhazip.com 2>/dev/null)
+    if [ -z "$local_v6" ]; then
+        local_v6=$(ip -6 addr show scope global | grep inet6 | awk '{print $2}' | cut -d/ -f1 | head -n 1 2>/dev/null)
+    fi
     if [ -n "$local_v6" ]; then
         local_v6_status="${GREEN}${local_v6}${NC}"
     else
         local_v6_status="${YELLOW}无 (未检测到本地IPv6)${NC}"
     fi
 
+    # WARP 出站 v4
     warp_v4=$(curl -s4 --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
     if [ -n "$warp_v4" ]; then
         warp_v4_ip=$(curl -s4 --connect-timeout 2 https://api.ip.sb 2>/dev/null)
@@ -68,6 +82,7 @@ check_system_info() {
         warp_v4_status="${YELLOW}未连接/未启用${NC}"
     fi
 
+    # WARP 出站 v6
     warp_v6=$(curl -s6 --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
     if [ -n "$warp_v6" ]; then
         warp_v6_ip=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
@@ -76,7 +91,7 @@ check_system_info() {
         warp_v6_status="${YELLOW}未连接/未启用${NC}"
     fi
 
-    # 4. BBR 状态检测
+    # 5. BBR 状态检测
     bbr_result=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}')
     if [ "$bbr_result" = "bbr" ]; then
         bbr_status="${GREEN}已开启 (BBR)${NC}"
@@ -84,7 +99,7 @@ check_system_info() {
         bbr_status="${YELLOW}未开启 ($bbr_result)${NC}"
     fi
 
-    # 5. Xray 状态、版本及路径检测
+    # 6. Xray 状态、版本及路径检测
     xray_path=""
     xray_ver=""
     if [ -f "/opt/suoha/xray/xray" ]; then
@@ -102,7 +117,7 @@ check_system_info() {
         xray_status="${RED}未安装${NC}"
     fi
 
-    # 6. WARP 客户端运行状态检测
+    # 7. WARP 客户端运行状态检测
     if command -v warp-cli &>/dev/null && systemctl is-active --quiet warp-svc 2>/dev/null; then
         warp_svc_status="${GREEN}已安装并运行${NC}"
     elif command -v warp-cli &>/dev/null; then
@@ -111,7 +126,7 @@ check_system_info() {
         warp_svc_status="${RED}未安装${NC}"
     fi
 
-    # 7. 域名与 Argo 独立检测
+    # 8. 域名与 Argo 独立检测
     if [ -f "/root/.acme.sh/acme.sh" ] || [ -d "/etc/yuzhou/domain" ]; then
         domain_check_status="${GREEN}已配置/绑定域名${NC}"
     else
@@ -136,6 +151,8 @@ show_menu() {
     echo -e " 🖥️  CPU 型号     : $cpu_model"
     echo -e " ⚙️  CPU 核心数   : $cores 核心"
     echo -e " 🏗️  CPU 架构     : $arch ($x86_v_level)"
+    echo -e " 📦 系统版本     : $os_version"
+    echo -e " 🐧 系统内核     : $kernel_version"
     echo -e " 🌐 本地 IPv4   : $local_v4_status"
     echo -e " 🌐 本地 IPv6   : $local_v6_status"
     echo -e " 🛡️  WARP 出站v4 : $warp_v4_status"
