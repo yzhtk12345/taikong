@@ -1214,7 +1214,7 @@ case "$mode" in
         manage_bbr
         ;;
     10)
-        manage_bbr
+        bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/acme.sh)
         ;;  
     *)
         echo "已成功退出脚本。"
