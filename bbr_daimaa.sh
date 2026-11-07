@@ -23,7 +23,6 @@ _bbr_enable() {
     echo -e "${CYAN}----------------------------------------${NC}"
     echo -e "${YELLOW}正在检查系统内核版本与模块支持...${NC}"
     
-    # 检查内核版本是否大于等于 4.9 (409)
     local kernel_version
     kernel_version=$(uname -r | awk -F. '{print $1*100 + $2}')
     
@@ -32,12 +31,10 @@ _bbr_enable() {
         return 1
     fi
 
-    # 尝试动态加载 tcp_bbr 模块
     if ! modprobe tcp_bbr 2>/dev/null; then
         echo -e "${YELLOW}⚠️ 警告：无法动态加载 tcp_bbr 模块，请检查当前内核是否编译了 BBR 支持。${NC}"
     fi
 
-    # 写入模块开机自启配置
     if [ -d /etc/modules-load.d ]; then
         echo "tcp_bbr" > /etc/modules-load.d/bbr.conf
     else
@@ -46,7 +43,6 @@ _bbr_enable() {
         fi
     fi
 
-    # 写入 sysctl 配置文件
     local sysctl_file="/etc/sysctl.d/99-bbr.conf"
     mkdir -p /etc/sysctl.d
     cat > "$sysctl_file" <<EOF
@@ -54,7 +50,6 @@ net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 EOF
 
-    # 刷新并让内核参数立即生效
     sysctl --system >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1
     
     if _bbr_check; then
@@ -72,25 +67,20 @@ _bbr_disable() {
     
     local sysctl_file="/etc/sysctl.d/99-bbr.conf"
     
-    # 清理旧配置文件与自启模块
     [ -f "$sysctl_file" ] && rm -f "$sysctl_file"
     [ -f /etc/modules-load.d/bbr.conf ] && rm -f /etc/modules-load.d/bbr.conf
     sed -i '/tcp_bbr/d' /etc/modules 2>/dev/null
 
-    # 写入 cubic 拥塞控制配置
     mkdir -p /etc/sysctl.d
     echo "net.ipv4.tcp_congestion_control=cubic" > "$sysctl_file"
     
-    # 实时修改内核参数切换回 cubic
     echo "正在将内核拥塞控制切换为 cubic..."
     if ! sysctl -w net.ipv4.tcp_congestion_control=cubic; then
         echo -e "${YELLOW}⚠️ 提示：实时修改内核参数失败，可能当前系统环境（如部分受限容器）不支持修改。${NC}"
     fi
 
-    # 重新加载系统配置
     sysctl --system >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1
     
-    # 严格校验关闭结果
     if _bbr_check; then
         echo -e "${RED}❌ 警告：BBR 关闭失败，当前内核状态仍为 bbr！${NC}"
         echo -e "${YELLOW}💡 提示：部分特殊定制内核可能无法直接在运行时关闭 BBR。${NC}"
@@ -102,7 +92,6 @@ _bbr_disable() {
 
 # 4. 主菜单与交互界面
 manage_bbr() {
-    # 权限校验
     if [ $EUID -ne 0 ]; then
        echo -e "${RED}❌ 错误：请使用 root 权限运行此功能！${NC}"
        return 1
@@ -121,9 +110,9 @@ manage_bbr() {
         echo -e "${CYAN}----------------------------------------${NC}"
         echo "1. 开启 BBR (检测内核并启用)"
         echo "2. 关闭 BBR (恢复系统默认 cubic)"
-        echo "3. 返回上一级菜单"
+        echo "0. 返回上一级菜单"
         echo -e "${CYAN}========================================${NC}"
-        read -p "请输入选项 [1-3]: " sub_choice < /dev/tty
+        read -p "请输入选项 [1-2, 0]: " sub_choice < /dev/tty
         
         case "$sub_choice" in
             1)
@@ -134,7 +123,7 @@ manage_bbr() {
                 _bbr_disable
                 read -p "按回车键继续..." < /dev/tty
                 ;;
-            3)
+            0)
                 break
                 ;;
             *)
@@ -147,12 +136,3 @@ manage_bbr() {
 
 # 脚本单独运行时的入口
 manage_bbr
-```[cite: 10]
-
----
-
-### 💡 核心功能亮点：
-1. **智能内核版本检测**：自动判断当前 Linux 系统内核版本是否低于 `4.9`，小于该版本会直接拒绝开启以防止报错[cite: 10]。
-2. **模块依赖持久化**：开启时会自动向 `/etc/modules-load.d/` 或 `/etc/modules` 写入 `tcp_bbr` 模块，确保系统重启后 BBR 依然生效[cite: 10]。
-3. **安全回退机制**：选择关闭 BBR 时，会自动清理相关模块文件并平滑切换回系统默认的 `cubic` 拥塞控制算法[cite: 10]。
-4. **全面适配**：完美兼容 Debian/Ubuntu（APT系）和 CentOS/RHEL/Fedora（YUM/DNF系）等主流 Linux 发行版[cite: 10]。
