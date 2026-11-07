@@ -128,31 +128,113 @@ action_init_security() {
     echo "  开始执行：系统初始化与安全加固"
     echo "===================================="
     
+    local current_hostname=$(hostname)
+
     # 1. 修改主机名
-    read -p "请输入新的主机名 (回车跳过): " NEW_HOSTNAME < /dev/tty
-    if [ -n "$NEW_HOSTNAME" ]; then hostnamectl set-hostname "$NEW_HOSTNAME"; fi
+    read -p "请输入新的主机名 (回车保持当前 [$current_hostname]): " NEW_HOSTNAME < /dev/tty
+    if [ -n "$NEW_HOSTNAME" ]; then
+        hostnamectl set-hostname "$NEW_HOSTNAME"
+        current_hostname="$NEW_HOSTNAME"
+        echo "[+] 主机名已成功修改为: $NEW_HOSTNAME"
+    else
+        echo "[+] 保持当前主机名不变: $current_hostname"
+    fi
 
     # 2. 创建新用户
     RANDOM_USER="user_$(tr -dc 'a-z0-9' < /dev/urandom | head -c 4)"
-    read -p "请输入要创建的新用户名 [默认 $RANDOM_USER]: " NEW_USER < /dev/tty
-    [ -z "$NEW_USER" ] && NEW_USER="$RANDOM_USER"
+    while true; do
+        read -p "请输入要创建的新用户名 (直接回车将随机生成 [$RANDOM_USER]): " NEW_USER < /dev/tty
+        if [ -z "$NEW_USER" ]; then
+            NEW_USER="$RANDOM_USER"
+            echo "[+] 已自动随机生成用户名: $NEW_USER"
+            break
+        elif id "$NEW_USER" &>/dev/null; then
+            echo "[-] 用户 '$NEW_USER' 已经存在，请更换一个用户名。"
+        else
+            break
+        fi
+    done
+
     useradd -m -s /bin/bash "$NEW_USER"
+    echo "[+] 请为用户 '$NEW_USER' 设置密码："
     passwd "$NEW_USER"
+    echo "[+] 用户 '$NEW_USER' 创建成功！"
 
     # 3. 赋予 Sudo 权限
-    usermod -aG sudo "$NEW_USER" 2>/dev/null || usermod -aG wheel "$NEW_USER" 2>/dev/null || echo "$NEW_USER ALL=(ALL:ALL) ALL" >> /etc/sudoers.d/"$NEW_USER"
+    if grep -q "^sudo:" /etc/group; then
+        usermod -aG sudo "$NEW_USER"
+        echo "[+] 已将 '$NEW_USER' 添加到 sudo 组"
+    elif grep -q "^wheel:" /etc/group; then
+        usermod -aG wheel "$NEW_USER"
+        echo "[+] 已将 '$NEW_USER' 添加到 wheel 组"
+    else
+        echo "$NEW_USER ALL=(ALL:ALL) ALL" >> /etc/sudoers.d/"$NEW_USER"
+        echo "[+] 已独立写入 sudoers 规则。"
+    fi
 
-    # 4. 修改 SSH 端口及禁用 Root 登录
+    # 4. 修改 SSH 端口
     local sshd_config="/etc/ssh/sshd_config"
     RANDOM_PORT=$((RANDOM % 64512 + 1024))
-    read -p "请输入新的 SSH 端口 [默认 $RANDOM_PORT]: " NEW_SSH_PORT < /dev/tty
-    [ -z "$NEW_SSH_PORT" ] && NEW_SSH_PORT="$RANDOM_PORT"
+    while true; do
+        read -p "请输入新的 SSH 端口 (1024-65535，直接回车随机生成 [$RANDOM_PORT]): " NEW_SSH_PORT < /dev/tty
+        if [ -z "$NEW_SSH_PORT" ]; then
+            NEW_SSH_PORT="$RANDOM_PORT"
+            echo "[+] 已自动随机生成 SSH 端口: $NEW_SSH_PORT"
+            break
+        elif [[ "$NEW_SSH_PORT" =~ ^[0-9]+$ ]] && [ "$NEW_SSH_PORT" -ge 1 ] && [ "$NEW_SSH_PORT" -le 65535 ]; then
+            if [ "$NEW_SSH_PORT" -eq 22 ]; then
+                echo "[-] 提示：你输入的是默认的 22 端口。"
+                read -p "确定要继续使用 22 吗？(y/n): " confirm < /dev/tty
+                [ "$confirm" = "y" ] && break
+            else
+                break
+            fi
+        else
+            echo "[-] 格式错误，请输入 1 到 65535 之间的数字。"
+        fi
+    done
 
-    sed -i "s/^#\?Port .*/Port $NEW_SSH_PORT/" "$sshd_config"
-    sed -i "s/^#\?PermitRootLogin .*/PermitRootLogin no/" "$sshd_config"
-    systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null
-    
-    echo "安全加固完成！新 SSH 端口: $NEW_SSH_PORT, 请妥善保存。"
+    cp "$sshd_config" "${sshd_config}.bak_$(date +%F_%T)"
+    if grep -qE "^#?Port " "$sshd_config"; then
+        sed -i "s/^#\?Port .*/Port $NEW_SSH_PORT/" "$sshd_config"
+    else
+        echo "Port $NEW_SSH_PORT" >> "$sshd_config"
+    fi
+
+    # 5. 禁止 Root 登录
+    if grep -qE "^#?PermitRootLogin " "$sshd_config"; then
+        sed -i "s/^#\?PermitRootLogin .*/PermitRootLogin no/" "$sshd_config"
+    else
+        echo "PermitRootLogin no" >> "$sshd_config"
+    fi
+
+    # 6. 重启 SSH
+    if sshd -t; then
+        if systemctl list-units --full -all | grep -q "ssh.service"; then
+            systemctl restart ssh
+        elif systemctl list-units --full -all | grep -q "sshd.service"; then
+            systemctl restart sshd
+        fi
+        echo "[√] SSH 服务重启成功！"
+    else
+        echo "[-] 错误：SSH 配置文件语法检查未通过！已自动恢复备份。"
+        cp "${sshd_config}.bak_"* "$sshd_config"
+        read -p "按回车键返回主菜单..." < /dev/tty
+        return
+    fi
+
+    # 7. 打印修改后的信息并提供返回主菜单
+    echo -e "\n===================================="
+    echo "         安全加固执行完毕！          "
+    echo "===================================="
+    echo " - 当前主机名   : $(hostname)"
+    echo " - 新用户名     : $NEW_USER"
+    echo " - 新 SSH 端口  : $NEW_SSH_PORT"
+    echo " - Root 远程登录: 已禁用"
+    echo "------------------------------------"
+    echo " 【警告】请立刻新开终端测试新用户登录，切勿关闭当前窗口！"
+    echo "===================================="
+    read -p "按回车键返回主菜单..." < /dev/tty
 }
 
 # 快速梭哈模式 (Argo Quick Tunnel 自动生成 VLESS & Trojan 节点)
@@ -1150,7 +1232,7 @@ clear
 echo "=========================================================="
 echo "         yuzhou 多协议代理节点快捷部署与管理工具(梭哈改)              "
 echo "=========================================================="
-echo "==本脚本改编至梭哈脚本，加入作者通过ai 加入了自己需要的的功能=="
+echo "==本脚本改编至梭哈脚本，加入作者通过ai加入了自己需要的的功能。=="
 echo "1. 加固 VPS 主机系统"
 echo "2. 梭哈模式 (自动生成 VLESS + Trojan 443 TLS 优选节点)"
 echo "3. 安装服务 (自定义域名绑定固定 Argo 隧道)"
@@ -1160,7 +1242,7 @@ echo "6. 额外增加 IPv6 SS 共存部署"
 echo "7. 额外增加 Hysteria 2 直连备用节点"
 echo "8. 配置 Cloudflare WARP 灵活路由与分流"
 echo "9. 开启 BBR 加速"
-echo "10.绑定域名 "
+echo "10.绑定域名"
 echo "0. 退出脚本"
 echo "=========================================================="
 read -p "请选择运行模式 (默认1): " mode
