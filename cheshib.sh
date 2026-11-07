@@ -1,3 +1,4 @@
+cat << 'EOF' > /etc/yuzhou/cheshi.sh
 #!/bin/bash
 
 # ==================== 目录及基础配置 ====================
@@ -50,11 +51,10 @@ check_system_info() {
         os_version=$(grep -i PRETTY_NAME /etc/os-release | cut -d \" -f2)
     else
         os_version="未知系统"
-    }
+    fi
     kernel_version=$(uname -r)
 
-    # 4. IP 四项细分检测 (优化 IPv6 获取逻辑，兼容 API 与本地网卡)
-    # 本地 IPv4
+    # 4. IP 四项细分检测
     local_v4=$(curl -s4 --connect-timeout 2 https://api.ip.sb 2>/dev/null || curl -s4 --connect-timeout 2 https://ipv4.icanhazip.com 2>/dev/null)
     if [ -n "$local_v4" ]; then
         local_v4_status="${GREEN}${local_v4}${NC}"
@@ -62,7 +62,6 @@ check_system_info() {
         local_v4_status="${RED}无 (未检测到本地IPv4)${NC}"
     fi
 
-    # 本地 IPv6 (多源获取 + 本地 fallback)
     local_v6=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null || curl -s6 --connect-timeout 2 https://ipv6.icanhazip.com 2>/dev/null)
     if [ -z "$local_v6" ]; then
         local_v6=$(ip -6 addr show scope global | grep inet6 | awk '{print $2}' | cut -d/ -f1 | head -n 1 2>/dev/null)
@@ -73,7 +72,6 @@ check_system_info() {
         local_v6_status="${YELLOW}无 (未检测到本地IPv6)${NC}"
     fi
 
-    # WARP 出站 v4
     warp_v4=$(curl -s4 --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
     if [ -n "$warp_v4" ]; then
         warp_v4_ip=$(curl -s4 --connect-timeout 2 https://api.ip.sb 2>/dev/null)
@@ -82,7 +80,6 @@ check_system_info() {
         warp_v4_status="${YELLOW}未连接/未启用${NC}"
     fi
 
-    # WARP 出站 v6
     warp_v6=$(curl -s6 --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
     if [ -n "$warp_v6" ]; then
         warp_v6_ip=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
@@ -237,3 +234,6 @@ while true; do
             ;;
     esac
 done
+EOF
+
+chmod +x /etc/yuzhou/cheshi.sh
