@@ -2,7 +2,7 @@
 
 # ==============================================================
 # 额外增加 IPv6 SS 共存部署模块 (ss_jiedian.sh)
-# 已集成：重启后自动恢复、防火墙放行、自动同步订阅
+# 已修复：重启后自动恢复、精准追加节点与同步订阅
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -118,38 +118,39 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# 保存持久化配置供开机自启恢复使用
+# 1. 保存持久化配置
 cat > "${YUZHOU_DIR}/ss_config.env" <<EOF
 SS_PORT="$ss_port"
 SS_PASS="$ss_password"
 SS_METHOD="$ss_method"
 EOF
 
-# 自动将 ss 恢复逻辑注入到开机自启订阅更新脚本中
+# 2. 完美将 SS 恢复与追加逻辑直接写入开机自启脚本尾部
 AUTO_UPDATE_SCRIPT="/etc/yuzhou/auto_argo_update.sh"
-if [ -f "$AUTO_UPDATE_SCRIPT" ] && ! grep -q "ss_config.env" "$AUTO_UPDATE_SCRIPT"; then
-    python3 -c "
-with open('$AUTO_UPDATE_SCRIPT', 'r', encoding='utf-8') as f:
-    content = f.read()
-ss_code = '''
-# === Auto-injected Shadowsocks recovery ===
-if [ -f \\"/etc/yuzhou/ss_config.env\\" ]; then
+if [ -f "$AUTO_UPDATE_SCRIPT" ]; then
+    # 先清理自启脚本里旧的 SS 恢复段（防止重复累加）
+    sed -i '/# === SS RECOVERY START ===/,/# === SS RECOVERY END ===/d' "$AUTO_UPDATE_SCRIPT"
+    
+    # 向自启脚本末尾追加可靠的恢复代码
+    cat >> "$AUTO_UPDATE_SCRIPT" << 'EOF_SS_INC'
+# === SS RECOVERY START ===
+if [ -f "/etc/yuzhou/ss_config.env" ]; then
     source /etc/yuzhou/ss_config.env
-    s_v6=\\$(ip -6 addr show scope global | grep inet6 | awk '{print \\\$2}' | cut -d/ -f1 | head -n 1 | tr -d '\n\r ')
-    [ -z \"\\$s_v6\" ] && s_v6=\\$(curl -s6 --connect-timeout 3 https://api64.ipify.org 2>/dev/null | tr -d '\n\r ')
-    if [ -n \"\\$s_v6\" ]; then
-        ss_info=\"\\${SS_METHOD}:\\${SS_PASS}\"
-        ss_b64=\\$(echo -n \"\\$ss_info\" | base64 -w 0 2>/dev/null || echo -n \"\\$ss_info\" | base64 | tr -d '\n')
-        echo \"ss://\\${ss_b64}@[\\$s_v6]:\\${SS_PORT}#IPv6-SS-Direct\" >> nodes.txt
+    s_v6=$(ip -6 addr show scope global | grep inet6 | awk '{print $2}' | cut -d/ -f1 | head -n 1 | tr -d '\n\r ')
+    [ -z "$s_v6" ] && s_v6=$(curl -s6 --connect-timeout 3 https://api64.ipify.org 2>/dev/null | tr -d '\n\r ')
+    if [ -n "$s_v6" ]; then
+        ss_info="${SS_METHOD}:${SS_PASS}"
+        if [ "$(grep -i PRETTY_NAME /etc/os-release 2>/dev/null | cut -d \" -f2 | awk '{print $1}')" == "Alpine" ]; then
+            ss_b64=$(echo -n "$ss_info" | base64 | tr -d '\n')
+        else
+            ss_b64=$(echo -n "$ss_info" | base64 -w 0 2>/dev/null || echo -n "$ss_info" | base64 | tr -d '\n')
+        fi
+        ss_link="ss://${ss_b64}@[${s_v6}]:${SS_PORT}#IPv6-SS-Direct"
+        echo "$ss_link" >> nodes.txt
     fi
 fi
-'''
-target = 'cat >> clash.yaml <<\\x27EOF_CLASH\\x27\nproxy-groups:'
-if target in content:
-    content = content.replace(target, ss_code + '\n' + target)
-    with open('$AUTO_UPDATE_SCRIPT', 'w', encoding='utf-8') as f:
-        f.write(content)
-" 2>/dev/null || true
+# === SS RECOVERY END ===
+EOF_SS_INC
 fi
 
 # 重启 Xray 进程
@@ -212,7 +213,7 @@ if [ "$(grep -i PRETTY_NAME /etc/os-release 2>/dev/null | cut -d \" -f2 | awk '{
 else
     ss_base64=$(echo -n "$ss_user_info" | base64 -w 0)
 fi
-ss_link="ss://${ss_base64}@[${ipv6_addr}]:${ss_port}#IPv6-SS-Direct"
+ss_link="ss://${ss_b64}@[${ipv6_addr}]:${ss_port}#IPv6-SS-Direct"
 
 work_nodes="${xray_dir}/nodes.txt"
 touch "$work_nodes"
