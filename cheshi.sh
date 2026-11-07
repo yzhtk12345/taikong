@@ -19,20 +19,39 @@ check_system_info() {
     arch=$(uname -m)
     cores=$(nproc 2>/dev/null || echo "1")
     
-    # 2. IP 单双栈检测
-    local has_v4=0
-    local has_v6=0
-    curl -s4 --connect-timeout 2 https://api.ip.sb >/dev/null 2>&1 && has_v4=1
-    curl -s6 --connect-timeout 2 https://api6.ip.sb >/dev/null 2>&1 && has_v6=1
-    
-    if [ $has_v4 -eq 1 ] && [ $has_v6 -eq 1 ]; then
-        ip_status="${GREEN}双栈 (IPv4 + IPv6)${NC}"
-    elif [ $has_v4 -eq 1 ]; then
-        ip_status="${YELLOW}单栈 (仅 IPv4)${NC}"
-    elif [ $has_v6 -eq 1 ]; then
-        ip_status="${YELLOW}单栈 (仅 IPv6)${NC}"
+    # 2. IP 四项细分检测 (本地v4, 本地v6, WARP出站v4, WARP出站v6)
+    # 本地 IPv4
+    local_v4=$(curl -s4 --connect-timeout 2 https://api.ip.sb 2>/dev/null)
+    if [ -n "$local_v4" ]; then
+        local_v4_status="${GREEN}${local_v4}${NC}"
     else
-        ip_status="${RED}无网络连接${NC}"
+        local_v4_status="${RED}无 (未检测到本地IPv4)${NC}"
+    fi
+
+    # 本地 IPv6
+    local_v6=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
+    if [ -n "$local_v6" ]; then
+        local_v6_status="${GREEN}${local_v6}${NC}"
+    else
+        local_v6_status="${YELLOW}无 (未检测到本地IPv6)${NC}"
+    fi
+
+    # WARP 出站 IPv4 (通过 Cloudflare Trace 或专用接口检查)
+    warp_v4=$(curl -s4 --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
+    if [ -n "$warp_v4" ]; then
+        warp_v4_ip=$(curl -s4 --connect-timeout 2 https://api.ip.sb 2>/dev/null)
+        warp_v4_status="${GREEN}已激活 (${warp_v4_ip})${NC}"
+    else
+        warp_v4_status="${YELLOW}未连接/未启用${NC}"
+    fi
+
+    # WARP 出站 IPv6
+    warp_v6=$(curl -s6 --connect-timeout 2 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -i "warp=on")
+    if [ -n "$warp_v6" ]; then
+        warp_v6_ip=$(curl -s6 --connect-timeout 2 https://api6.ip.sb 2>/dev/null)
+        warp_v6_status="${GREEN}已激活 (${warp_v6_ip})${NC}"
+    else
+        warp_v6_status="${YELLOW}未连接/未启用${NC}"
     fi
 
     # 3. BBR 状态检测
@@ -61,20 +80,28 @@ check_system_info() {
         xray_status="${RED}未安装${NC}"
     fi
 
-    # 5. WARP 状态检测
+    # 5. WARP 服务运行状态检测
     if command -v warp-cli &>/dev/null && systemctl is-active --quiet warp-svc 2>/dev/null; then
-        warp_status="${GREEN}已安装并运行${NC}"
+        warp_svc_status="${GREEN}已安装并运行${NC}"
     elif command -v warp-cli &>/dev/null; then
-        warp_status="${YELLOW}已安装但未运行${NC}"
+        warp_svc_status="${YELLOW}已安装但未运行${NC}"
     else
-        warp_status="${RED}未安装${NC}"
+        warp_svc_status="${RED}未安装${NC}"
     fi
 
-    # 6. 域名与证书检测
-    if [ -f "/root/.cloudflared/cert.pem" ] || [ -d "/root/.cloudflared" ] && [ "$(ls -A /root/.cloudflared 2>/dev/null)" ]; then
-        domain_status="${GREEN}已配置 Argo/域名授权${NC}"
+    # 6. 域名与 Argo 分开检测
+    # 域名检测 (检查是否存在 acme 或自定义域名配置文件)
+    if [ -f "/root/.acme.sh/acme.sh" ] || [ -d "/etc/yuzhou/domain" ]; then
+        domain_check_status="${GREEN}已配置/绑定域名${NC}"
     else
-        domain_status="${YELLOW}未检测到本地域名/Argo授权缓存${NC}"
+        domain_check_status="${YELLOW}未绑定自定义域名${NC}"
+    fi
+
+    # Argo 隧道检测 (检查 .cloudflared 授权缓存)
+    if [ -f "/root/.cloudflared/cert.pem" ] || [ -d "/root/.cloudflared" ] && [ "$(ls -A /root/.cloudflared 2>/dev/null)" ]; then
+        argo_check_status="${GREEN}已授权/有Argo缓存${NC}"
+    else
+        argo_check_status="${YELLOW}未检测到Argo隧道授权${NC}"
     fi
 }
 
@@ -84,14 +111,18 @@ show_menu() {
     check_system_info
     
     echo -e "${CYAN}==============================================================${NC}"
-    echo -e "${CYAN}          yuzhou的vps快捷xray脚本 (主控菜单)                ${NC}"
+    echo -e "${CYAN}        yuzhou的vps快捷xray脚本 (主控菜单)                  ${NC}"
     echo -e "${CYAN}==============================================================${NC}"
-    echo -e " 🖥️  CPU 芯片 : $cpu_model ($cores 核心 / 架构: $arch)"
-    echo -e " 🌐 IP 栈状态 : $ip_status"
-    echo -e " 🚀 BBR 加速  : $bbr_status"
-    echo -e " 📦 Xray 状态 : $xray_status"
-    echo -e " ☁️  WARP 状态 : $warp_status"
-    echo -e " 🏷️  域名/证书 : $domain_status"
+    echo -e " 🖥️  CPU 芯片     : $cpu_model ($cores 核心 / 架构: $arch)"
+    echo -e " 🌐 本地 IPv4   : $local_v4_status"
+    echo -e " 🌐 本地 IPv6   : $local_v6_status"
+    echo -e " 🛡️  WARP 出站v4 : $warp_v4_status"
+    echo -e " 🛡️  WARP 出站v6 : $warp_v6_status"
+    echo -e " 🚀 BBR 加速    : $bbr_status"
+    echo -e " 📦 Xray 状态   : $xray_status"
+    echo -e " ☁️  WARP 客户端 : $warp_svc_status"
+    echo -e " 🏷️  域名状态    : $domain_check_status"
+    echo -e " 🚇 Argo 状态   : $argo_check_status"
     echo -e "${CYAN}--------------------------------------------------------------${NC}"
     echo -e " 1. 加固 VPS 主机系统 (修改端口/用户/禁用Root)"
     echo -e " 2. 梭哈模式 (自动生成 VLESS + Trojan 443 优选节点)"
@@ -116,9 +147,7 @@ while true; do
 
     case "$choice" in
         1)
-            # 后续可改为调用: bash "${MODULES_DIR}/1_hardening.sh"
             echo "正在执行第 1 项: 加固 VPS 主机..."
-            # 预留接口
             read -p "按回车键返回主菜单..."
             ;;
         2)
