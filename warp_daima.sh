@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================
-# Cloudflare WARP 安装部署与动态本地端口分流管理模块 (warp_daima.sh)
-# 支持 IPv4 / IPv6 自动双栈分流与路由
+# Cloudflare WARP 安装部署与动态双栈端口分流管理模块 (warp_daima.sh)
+# 路径严格统一至 /etc/yuzhou/
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -14,7 +14,7 @@ YELLOW="\033[33m"
 CYAN="\033[36m"
 NC="\033[0m"
 
-# 1. 检测现有的 Xray 配置文件及路径
+# 1. 检测 /etc/yuzhou/ 下的 Xray 配置文件及路径
 xray_dir=""
 cfg_json=""
 
@@ -24,15 +24,12 @@ if [ -f "${YUZHOU_DIR}/xray/config.json" ]; then
 elif [ -f "${YUZHOU_DIR}/quick/xray/config.json" ]; then
     xray_dir="${YUZHOU_DIR}/quick"
     cfg_json="${YUZHOU_DIR}/quick/xray/config.json"
-elif [ -f "/opt/suoha/config.json" ]; then
-    xray_dir="/opt/suoha"
-    cfg_json="/opt/suoha/config.json"
-elif [ -f "/opt/suoha_quick/xray/config.json" ]; then
-    xray_dir="/opt/suoha_quick"
-    cfg_json="/opt/suoha_quick/xray/config.json"
+elif [ -f "${YUZHOU_DIR}/service/config.json" ]; then
+    xray_dir="${YUZHOU_DIR}/service"
+    cfg_json="${YUZHOU_DIR}/service/config.json"
 else
     clear
-    echo -e "${RED}[错误] 未找到正在运行的 Xray 配置文件，请先执行主菜单【梭哈模式】或【安装服务】！${NC}"
+    echo -e "${RED}[错误] 未在 /etc/yuzhou/ 下找到正在运行的 Xray 配置文件，请先执行主菜单相关节点部署！${NC}"
     read -p "按回车键返回..." < /dev/tty
     exit 1
 fi
@@ -65,18 +62,17 @@ fi
 systemctl enable --now warp-svc >/dev/null 2>&1
 sleep 2
 
-# === 关键点：开启 WARP 双栈注册与双栈协议支持 ===
+# 检测并解决 Registration Missing 问题
 if warp-cli status 2>/dev/null | grep -q "Registration Missing"; then
     warp-cli registration new >/dev/null 2>&1 || true
     sleep 2
 fi
 
-# 尝试配置 IPv6/双栈支持（兼容不同 warp-cli 版本）
+# 配置双栈及代理模式
 warp-cli mode proxy >/dev/null 2>&1
 warp-cli tunnel ip set-dual-stack >/dev/null 2>&1 || true
-warp-cli daemon mode proxy >/dev/null 2>&1 || true
 
-# 3. 动态随机生成本地 SOCKS 端口并检查占用
+# 3. 动态随机生成本地 SOCKS 端口并检查占用（若存在旧端口则清理）
 while true; do
     warp_local_port=$((RANDOM % 20000 + 30000))
     if ! ss -tlnp | grep -q ":${warp_local_port} " && ! ss -ulnp | grep -q ":${warp_local_port} "; then
@@ -88,7 +84,7 @@ done
 warp-cli proxy port "$warp_local_port" >/dev/null 2>&1
 warp-cli connect >/dev/null 2>&1
 
-echo -e "${GREEN}✅ WARP 双栈本地代理端口已分配并启动: ${CYAN}$warp_local_port${NC}"
+echo -e "${GREEN}✅ WARP 双栈本地代理端口已成功分配并启动: ${CYAN}$warp_local_port${NC}"
 echo "$warp_local_port" > "$LAST_WARP_PORT_FILE"
 
 # 路由分流交互菜单
@@ -126,8 +122,6 @@ with open(cfg_file, 'r', encoding='utf-8') as f:
 
 outbounds = data.get('outbounds', [])
 outbounds = [ob for ob in outbounds if ob.get('tag') != 'warp-out']
-
-# 注入支持双栈解析的 SOCKS 出站
 outbounds.append({
     'tag': 'warp-out',
     'protocol': 'socks',
@@ -172,7 +166,7 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
             pkill -f xray || true
             nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
             echo $! > "${xray_dir}/xray.pid"
-            echo -e "${GREEN}✅ 自定义域名规则已成功注入并生效（支持双栈）！${NC}"
+            echo -e "${GREEN}✅ 自定义域名规则已成功注入并生效（使用本地端口: $warp_local_port）！${NC}"
             read -p "按回车键继续..." < /dev/tty
             ;;
         2)
@@ -210,14 +204,14 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
             pkill -f xray || true
             nohup "${xray_dir}/xray/xray" run -config "$cfg_json" >/dev/null 2>&1 &
             echo $! > "${xray_dir}/xray.pid"
-            echo -e "${GREEN}✅ 已成功切换为【全局双栈 WARP 模式】（IPv4/IPv6 流量均接管）！${NC}"
+            echo -e "${GREEN}✅ 已成功切换为【全局双栈 WARP 模式】（本地端口: $warp_local_port）！${NC}"
             read -p "按回车键继续..." < /dev/tty
             ;;
         3)
             echo ""
             echo -e "${CYAN}📊 当前 WARP 客户端状态：${NC}"
             warp-cli status
-            echo -e "📌 本地双栈 SOCKS 代理监听端口: ${GREEN}$warp_local_port${NC}"
+            echo -e "📌 当前本地 SOCKS 代理监听端口: ${GREEN}$warp_local_port${NC}"
             echo ""
             read -p "按回车键继续..." < /dev/tty
             ;;
