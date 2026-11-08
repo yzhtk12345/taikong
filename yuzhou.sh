@@ -1,29 +1,26 @@
 #!/bin/bash
 # === 自动安装并注册 yuzhou 全局快捷命令 ===
 install_shortcut() {
-    local target_shell=""
     local rc_file=""
-
-    # 判断当前用户的 Shell 类型（支持 bash 和 zsh）
     if [[ "$SHELL" == *"zsh"* ]]; then
         rc_file="$HOME/.zshrc"
     elif [[ "$SHELL" == *"bash"* ]]; then
         rc_file="$HOME/.bashrc"
     else
         return
-    }
+    fi
 
-    # 检查配置文件中是否已经写入了该命令，避免重复写入
     if ! grep -q "yuzhou() {" "$rc_file" 2>/dev/null; then
-        echo -e "\n# 自动添加 yuzhou 快捷命令" >> "$rc_file"
-        echo "yuzhou() {" >> "$rc_file"
-        echo "    bash <(curl -fsSL -H \"Cache-Control: no-cache\" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/yuzhou.sh) \"\$@\"" >> "$rc_file"
-        echo "}" >> "$rc_file"
+        cat << 'EOF' >> "$rc_file"
+
+# 自动添加 yuzhou 快捷命令
+yuzhou() {
+    bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/yuzhou.sh) "$@"
+}
+EOF
         echo "[信息] 快捷命令 'yuzhou' 已自动注册！下次直接输入 yuzhou 即可运行。"
     fi
 }
-
-# 执行注册函数
 install_shortcut
 # ========================================
 # ==================== 目录及基础配置 ====================
