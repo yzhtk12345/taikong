@@ -3,7 +3,6 @@
 # ==============================================================
 # Cloudflare WARP 安装部署与动态双栈端口分流管理模块 (warp_daima.sh)
 # 路径严格统一至 /etc/yuzhou/
-# 增强功能：20次自动重试拨号 + 完美流量接管分流
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -138,7 +137,7 @@ while true; do
         1)
             echo ""
             echo "请输入需要走 WARP 的域名或关键字（多个域名请用空格隔开）"
-            echo "例如: openai.com chatgpt.com claude.ai t.me ip.sb"
+            echo "例如: openai.com chatgpt.com claude.ai t.me"
             read -p "输入域名: " user_domains < /dev/tty
             
             if [ -z "$user_domains" ]; then
@@ -153,7 +152,9 @@ cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
-# 确保 outbounds 中包含 warp-out 和 direct
+if 'inbounds' not in data:
+    data['inbounds'] = []
+
 outbounds = data.get('outbounds', [])
 outbounds = [ob for ob in outbounds if ob.get('tag') not in ['warp-out', 'direct']]
 outbounds.append({
@@ -214,7 +215,6 @@ cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
-# 把 warp-out 强制置于 outbounds 列表的最前端作为默认出口
 outbounds = data.get('outbounds', [])
 other_obs = [ob for ob in outbounds if ob.get('tag') not in ['warp-out', 'direct']]
 warp_ob = {
@@ -225,11 +225,8 @@ warp_ob = {
     }
 }
 direct_ob = {'tag': 'direct', 'protocol': 'freedom', 'settings': {}}
-
-# 设置 outbounds 顺序: [warp-out, direct, 其他...]
 data['outbounds'] = [warp_ob, direct_ob] + other_obs
 
-# 精确路由：把中国大陆流量和私有 IP 排除，其余所有入站（vless-in, trojan-in等）出站强制走 warp-out
 routing = {
     'domainStrategy': 'IPIfNonMatch',
     'rules': [
@@ -313,5 +310,3 @@ except Exception as e:
             ;;
     esac
 done
-```[cite: 21]
-
