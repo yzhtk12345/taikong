@@ -3,7 +3,7 @@
 # ==============================================================
 # Cloudflare WARP 安装部署与动态双栈端口分流管理模块 (warp_daima.sh)
 # 路径严格统一至 /etc/yuzhou/
-# 增强功能：高强度 20 次自动重试拨号与状态检测
+# 增强功能：20次自动重试拨号 + 完美流量接管分流
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -95,7 +95,6 @@ while [ $retry_count -le $max_retries ]; do
     warp-cli proxy port "$warp_local_port" >/dev/null 2>&1
     warp-cli connect >/dev/null 2>&1
 
-    # 每次请求后检测最多 4 秒
     for i in {1..4}; do
         if warp-cli status 2>/dev/null | grep -q "Connected"; then
             connected_success=1
@@ -114,7 +113,7 @@ while [ $retry_count -le $max_retries ]; do
 done
 
 if [ $connected_success -eq 0 ]; then
-    echo -e "${RED}[警告] 尝试 20 次后仍未能完成注册连接。建议先进入菜单，稍后尝试执行菜单中的 3 选项查看实时状态。${NC}"
+    echo -e "${RED}[警告] 尝试 20 次后仍未能完成注册连接。建议进入菜单后按选项 3 检查。${NC}"
     sleep 2
 fi
 
@@ -128,7 +127,7 @@ while true; do
     echo -e "${CYAN}   Cloudflare WARP 双栈路由与灵活分流管理 (warp_daima.sh)     ${NC}"
     echo -e "${CYAN}==============================================================${NC}"
     echo "1. 自定义添加指定域名/应用走 WARP (交互式输入)"
-    echo "2. 切换为【全局双栈模式】：所有外网流量强制走 WARP (IPv4+IPv6)"
+    echo "2. 切换为【全局双栈模式】：所有节点外网流量强制走 WARP (IPv4+IPv6)"
     echo "3. 查看当前 WARP 路由状态与出口 IP"
     echo "4. 关闭并停用 WARP 代理（恢复默认直连路由）"
     echo "0. 返回上级主菜单"
@@ -139,7 +138,7 @@ while true; do
         1)
             echo ""
             echo "请输入需要走 WARP 的域名或关键字（多个域名请用空格隔开）"
-            echo "例如: openai.com chatgpt.com claude.ai t.me"
+            echo "例如: openai.com chatgpt.com claude.ai t.me ip.sb"
             read -p "输入域名: " user_domains < /dev/tty
             
             if [ -z "$user_domains" ]; then
@@ -154,9 +153,7 @@ cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
-if 'inbounds' not in data:
-    data['inbounds'] = []
-
+# 确保 outbounds 中包含 warp-out 和 direct
 outbounds = data.get('outbounds', [])
 outbounds = [ob for ob in outbounds if ob.get('tag') not in ['warp-out', 'direct']]
 outbounds.append({
@@ -217,26 +214,27 @@ cfg_file = '${cfg_json}'
 with open(cfg_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
-if 'inbounds' not in data:
-    data['inbounds'] = []
-
+# 把 warp-out 强制置于 outbounds 列表的最前端作为默认出口
 outbounds = data.get('outbounds', [])
-outbounds = [ob for ob in outbounds if ob.get('tag') not in ['warp-out', 'direct']]
-outbounds.append({
+other_obs = [ob for ob in outbounds if ob.get('tag') not in ['warp-out', 'direct']]
+warp_ob = {
     'tag': 'warp-out',
     'protocol': 'socks',
     'settings': {
         'servers': [{'address': '127.0.0.1', 'port': int('${warp_local_port}')}]
     }
-})
-outbounds.append({'tag': 'direct', 'protocol': 'freedom', 'settings': {}})
-data['outbounds'] = outbounds
+}
+direct_ob = {'tag': 'direct', 'protocol': 'freedom', 'settings': {}}
 
+# 设置 outbounds 顺序: [warp-out, direct, 其他...]
+data['outbounds'] = [warp_ob, direct_ob] + other_obs
+
+# 精确路由：把中国大陆流量和私有 IP 排除，其余所有入站（vless-in, trojan-in等）出站强制走 warp-out
 routing = {
     'domainStrategy': 'IPIfNonMatch',
     'rules': [
-        { 'type': 'field', 'outboundTag': 'direct', 'ip': ['127.0.0.0/8', '::1/128', 'geoip:private', 'geoip:cn'] },
         { 'type': 'field', 'outboundTag': 'direct', 'domain': ['geosite:cn'] },
+        { 'type': 'field', 'outboundTag': 'direct', 'ip': ['geoip:cn', 'geoip:private'] },
         { 'type': 'field', 'outboundTag': 'warp-out', 'network': 'tcp,udp' }
     ]
 }
@@ -250,7 +248,7 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
             [ ! -f "$xray_bin_path" ] && xray_bin_path="${xray_dir}/xray"
             nohup "$xray_bin_path" run -config "$cfg_json" >/dev/null 2>&1 &
             echo $! > "${xray_dir}/xray.pid"
-            echo -e "${GREEN}✅ 已成功切换为【全局双栈 WARP 模式】（本地端口: $warp_local_port）！${NC}"
+            echo -e "${GREEN}✅ 已成功切换为【全局双栈 WARP 模式】！代理流量已全额接管。${NC}"
             read -p "按回车键继续..." < /dev/tty
             ;;
         3)
@@ -277,9 +275,9 @@ try:
         data = json.load(f)
     
     if 'outbounds' in data:
-        data['outbounds'] = [ob for ob in data['outbounds'] if ob.get('tag') not in ['warp-out', 'direct']]
-        if not any(ob.get('protocol') == 'freedom' for ob in data['outbounds']):
-            data['outbounds'].append({'protocol': 'freedom', 'settings': {}})
+        data['outbounds'] = [ob for ob in data['outbounds'] if ob.get('tag') != 'warp-out']
+        if not any(ob.get('tag') == 'direct' or ob.get('protocol') == 'freedom' for ob in data['outbounds']):
+            data['outbounds'].append({'tag': 'direct', 'protocol': 'freedom', 'settings': {}})
     
     if 'routing' in data and 'rules' in data['routing']:
         clean_rules = []
@@ -315,3 +313,15 @@ except Exception as e:
             ;;
     esac
 done
+```[cite: 21]
+
+### 💡 替换后的操作步骤：
+1. 更新脚本后重新运行 `warp_daima.sh`。
+2. 自动重试成功激活 WARP 后，选择 **选项 2（切换为全局双栈模式）**[cite: 21]。
+3. 此时在客户端（如 v2rayN、Clash 等）连接代理节点，打开 `[https://api.ip.sb](https://api.ip.sb)` 或 `[https://ip138.com](https://ip138.com)` 查看，查询到的出口 IP 将不再是服务器的原生 IP，而是**百分之百变成 104.28.x.x 的 Cloudflare WARP 伪装 IP**[cite: 21, 22]！
+
+<ElicitationsGroup message="如果在测试节点出口 IP 时遇到任何异常，您可以点击以下选项继续排查：">
+  <Elicitation label="出口IP仍是本机原IP" query="我按选项2切换了全局双栈模式，但客户端测试出口 IP 依然是服务器的原生 IP，请帮我排查原因。"/>
+  <Elicitation label="切换全局后节点断网" query="我按选项2切换了全局双栈模式，节点变成了无网络连接，请告诉我怎么检查 Xray 进程或配置文件。"/>
+  <Elicitation label="想查看实时Xray配置" query="请提供一条查看当前正在运行的 Xray 配置文件中 outbounds 和 routing 规则的终端命令。"/>
+</ElicitationsGroup>
