@@ -315,13 +315,3 @@ except Exception as e:
 done
 ```[cite: 21]
 
-### 💡 替换后的操作步骤：
-1. 更新脚本后重新运行 `warp_daima.sh`。
-2. 自动重试成功激活 WARP 后，选择 **选项 2（切换为全局双栈模式）**[cite: 21]。
-3. 此时在客户端（如 v2rayN、Clash 等）连接代理节点，打开 `[https://api.ip.sb](https://api.ip.sb)` 或 `[https://ip138.com](https://ip138.com)` 查看，查询到的出口 IP 将不再是服务器的原生 IP，而是**百分之百变成 104.28.x.x 的 Cloudflare WARP 伪装 IP**[cite: 21, 22]！
-
-<ElicitationsGroup message="如果在测试节点出口 IP 时遇到任何异常，您可以点击以下选项继续排查：">
-  <Elicitation label="出口IP仍是本机原IP" query="我按选项2切换了全局双栈模式，但客户端测试出口 IP 依然是服务器的原生 IP，请帮我排查原因。"/>
-  <Elicitation label="切换全局后节点断网" query="我按选项2切换了全局双栈模式，节点变成了无网络连接，请告诉我怎么检查 Xray 进程或配置文件。"/>
-  <Elicitation label="想查看实时Xray配置" query="请提供一条查看当前正在运行的 Xray 配置文件中 outbounds 和 routing 规则的终端命令。"/>
-</ElicitationsGroup>
