@@ -2,7 +2,7 @@
 
 # ==============================================================
 # XHTTP & Vision 7节点终极版 (xhttp_jiedian.sh) 
-# 【真正全框架完美共存版】绝不覆盖旧节点，路径严格统一至 /etc/yuzhou/quick
+# 【配置修复版】完美共存、路径严格统一、修复密钥提取防崩溃
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -21,7 +21,7 @@ NC="\033[0m"
 
 clear
 echo -e "${CYAN}==============================================================${NC}"
-echo -e "${CYAN}   XHTTP & Vision 7节点部署模块 (全框架无损合并共存版)       ${NC}"
+echo -e "${CYAN}   XHTTP & Vision 7节点部署模块 (修复密钥提取与共存版)       ${NC}"
 echo -e "${CYAN}==============================================================${NC}"
 
 # 0. 自动检查并安装基础依赖包
@@ -56,7 +56,7 @@ server_ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
 
 echo -e "${GREEN}[+] 网络模式: IPv${ips} | ISP: ${isp} | 公网IP: ${server_ip}${NC}"
 
-# 3. 强行更新/升级 Xray-core 至最新官方二进制（确保完全支持 xhttp 语法）
+# 3. 更新 Xray-core 至最新官方二进制（确保完全支持 xhttp 与 reality 语法）
 arch="$(uname -m)"
 case "$arch" in
     x86_64 | x64 | amd64 )
@@ -83,11 +83,17 @@ unzip -q -o xray.zip -d "$XRAY_DIR"
 chmod +x cloudflared-linux "${XRAY_DIR}/xray"
 rm -f xray.zip
 
-# 4. 生成 XHTTP 专属密钥与参数
+# 4. 生成 XHTTP 专属密钥与参数（加入安全容错提取，防止为空）
 uuid=$(cat /proc/sys/kernel/random/uuid)
-x25519_key=$("${XRAY_DIR}/xray" x25519)
-private_key=$(echo "$x25519_key" | awk '/Private key:/{print $3}')
-public_key=$(echo "$x25519_key" | awk '/Public key:/{print $3}')
+x25519_output=$("${XRAY_DIR}/xray" x25519)
+private_key=$(echo "$x25519_output" | grep "Private key" | awk '{print $3}')
+public_key=$(echo "$x25519_output" | grep "Public key" | awk '{print $3}')
+
+if [ -z "$private_key" ]; then
+    private_key=$("${XRAY_DIR}/xray" x25519 | grep "Private" | awk '{print $3}')
+    public_key=$("${XRAY_DIR}/xray" x25519 | grep "Public" | awk '{print $3}')
+fi
+
 short_id=$(openssl rand -hex 4)
 dest_sni="learn.microsoft.com"
 
@@ -230,7 +236,6 @@ if "outbounds" not in data:
 
 existing_inbounds = data.get("inbounds", [])
 tags_to_remove = ["vless-vision-in", "vless-xhttp-reality-in", "vless-xhttp-udp-direct-in", "argo-tcp-in", "argo-udp-in"]
-# 仅过滤掉上一次注入过的旧 XHTTP 入站，绝对保留原有的 vless-in, trojan-in, hy2-direct, ss-ipv6
 existing_inbounds = [ib for ib in existing_inbounds if ib.get("tag") not in tags_to_remove]
 
 existing_inbounds.extend(new_inbounds)
@@ -294,19 +299,16 @@ node_tag=$(echo "$isp" | sed -e 's/_/%20/g' -e 's/,/%2C/g')
 work_nodes="${QUICK_DIR}/nodes.txt"
 touch "$work_nodes"
 
-# 仅清理旧的同名 XHTTP 节点
 sed -i "/VLESS-Reality-Vision/d" "$work_nodes"
 sed -i "/VLESS-XHTTP-Reality/d" "$work_nodes"
 sed -i "/VLESS-XHTTP-UDP-Direct/d" "$work_nodes"
 sed -i "/XHTTP-TCP-/d" "$work_nodes"
 sed -i "/XHTTP-UDP-/d" "$work_nodes"
 
-# 追加直连 3 个节点
 echo "vless://${uuid}@${server_ip}:${port_vision}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${dest_sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=tcp#${node_tag}-VLESS-Reality-Vision" >> "$work_nodes"
 echo "vless://${uuid}@${server_ip}:${port_xhttp_reality}?encryption=none&security=reality&sni=${dest_sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=xhttp&mode=stream#${node_tag}-VLESS-XHTTP-Reality" >> "$work_nodes"
 echo "vless://${uuid}@${server_ip}:${port_xhttp_udp_direct}?encryption=none&security=none&type=xhttp&mode=packet#${node_tag}-VLESS-XHTTP-UDP-Direct" >> "$work_nodes"
 
-# 追加 Argo TCP 3 个节点 (1原始 + 2优选)
 echo "vless://${uuid}@${argo_tcp_domain}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-XHTTP-TCP-Argo" >> "$work_nodes"
 opt_domains=("cf.090227.xyz" "cloudflare.182682.xyz")
 opt_labels=("优选cf.090227" "优选182682")
@@ -316,7 +318,6 @@ for idx in "${!opt_domains[@]}"; do
     echo "vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-XHTTP-TCP-${l}-Argo" >> "$work_nodes"
 done
 
-# 追加 Argo UDP 3 个节点 (1原始 + 2优选)
 echo "vless://${uuid}@${argo_udp_domain}:443?encryption=none&security=tls&sni=${argo_udp_domain}&type=xhttp&host=${argo_udp_domain}&path=%2F${urlpath_argo_udp}&mode=packet#${node_tag}-XHTTP-UDP-Argo" >> "$work_nodes"
 for idx in "${!opt_domains[@]}"; do
     d="${opt_domains[$idx]}"
