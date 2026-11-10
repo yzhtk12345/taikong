@@ -3,7 +3,7 @@
 # ==============================================================
 # XHTTP & Vision 5协议大杀器部署模块 (xhttp_jiedian.sh)
 # 包括：Vision直连、XHTTP Reality、XHTTP UDP直连、XHTTP TCP Argo、XHTTP UDP Argo
-# 已完美集成：20000-60000 高位随机端口、智能防占用检测、防火墙放行、开机自启恢复与动态订阅同步
+# 已完美集成：20000-60000高位防冲突随机端口、防火墙自动放行、开机自启与Argo自动重连恢复
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -22,7 +22,7 @@ NC="\033[0m"
 
 clear
 echo -e "${CYAN}==============================================================${NC}"
-echo -e "${CYAN}      XHTTP & Vision 5 节点部署模块 (智能防端口占用版)        ${NC}"
+echo -e "${CYAN}    XHTTP & Vision 5 节点完整版 (含开机自启与Argo自动恢复)    ${NC}"
 echo -e "${CYAN}==============================================================${NC}"
 
 # 0. 自动检查并安装基础依赖包
@@ -32,7 +32,7 @@ for pkg in unzip curl openssl python3; do
         if [ -f /etc/debian_version ]; then
             apt-get update >/dev/null 2>&1 && apt-get install -y $pkg >/dev/null 2>&1
         elif [ -f /etc/redhat-release ] || grep -qi "rhel" /etc/os-release || grep -qi "centos" /etc/os-release; then
-            yum install -y $pkg >/dev/null 2>&1 || dnf install -y $pkg >/dev/null 2>&1
+            yum install -y $pkg >/dev/null 2>&1 \vert{}\vert{} dnf install -y$pkg >/dev/null 2>&1
         elif grep -qi "alpine" /etc/os-release 2>/dev/null; then
             apk add --no-cache $pkg >/dev/null 2>&1
         fi
@@ -55,7 +55,7 @@ isp=$(curl -$ips -s --connect-timeout 2 https://speed.cloudflare.com/meta 2>/dev
 server_ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
 [ -z "$server_ip" ] && server_ip=$(curl -s4 --connect-timeout 2 https://api.ip.sb/ip 2>/dev/null)
 
-echo -e "${GREEN}[+] 网络模式: IPv${ips} | ISP: ${isp} | 公网IP: ${server_ip}${NC}"
+echo -e "${GREEN}[+] 网络模式: IPv${ips} \vert{} ISP:${isp} | 公网IP: ${server_ip}${NC}"
 
 # 3. 精确清理旧的进程
 pkill -f "${QUICK_DIR}/xray/xray" >/dev/null 2>&1
@@ -64,7 +64,7 @@ pkill -f "cloudflared-linux" >/dev/null 2>&1
 cd "$QUICK_DIR" || exit
 rm -rf xray cloudflared-linux xray.zip
 
-# 4. 架构判断与核心下载 (保证拉取最新 Xray 支持 XHTTP)
+# 4. 架构判断与核心下载
 arch="$(uname -m)"
 case "$arch" in
     x86_64 | x64 | amd64 )
@@ -98,7 +98,7 @@ public_key=$(echo "$x25519_key" | awk '/Public key:/{print $3}')
 short_id=$(openssl rand -hex 4)
 dest_sni="learn.microsoft.com"
 
-# 智能端口分配函数（在 20000-60000 之间随机挑选，自动检测系统占用，若占用则循环换一个）
+# 智能防占用端口分配函数 (20000-60000 区间)
 get_available_port() {
     local candidate_port
     while true; do
@@ -107,9 +107,7 @@ get_available_port() {
         else
             candidate_port=$((RANDOM % 40001 + 20000))
         fi
-        
-        # 检查是否被占用（兼顾 ss, netstat）
-        if ! (ss -tuln 2>/dev/null | grep -q ":$candidate_port " || netstat -tuln 2>/dev/null | grep -q ":$candidate_port "); then
+        if ! (ss -tuln 2>/dev/null | grep -q ":$candidate_port " \vert{}\vert{} netstat -tuln 2>/dev/null \vert{} grep -q ":$candidate_port "); then
             echo "$candidate_port"
             return 0
         fi
@@ -126,7 +124,7 @@ port_argo_udp=$(get_available_port)
 urlpath_argo_tcp="xhttp-tcp-$(echo "$uuid" | awk -F- '{print $1}')"
 urlpath_argo_udp="xhttp-udp-$(echo "$uuid" | awk -F- '{print $1}')"
 
-# 6. 生成安全的 config.json (包含 5 大节点)
+# 6. 生成安全的 config.json
 cat > xray/config.json <<EOF
 {
     "log": { "loglevel": "warning" },
@@ -228,10 +226,10 @@ EOF
 "${QUICK_DIR}/xray/xray" run -config "${QUICK_DIR}/xray/config.json" >/dev/null 2>&1 &
 echo $! > "${QUICK_DIR}/xray.pid"
 
-"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_tcp.log 2>&1 &
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_tcp.log 2>&1 &
 echo $! > "${QUICK_DIR}/cf_tcp.pid"
 
-"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_udp.log 2>&1 &
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_udp.log 2>&1 &
 echo $! > "${QUICK_DIR}/cf_udp.pid"
 
 sleep 2
@@ -250,9 +248,9 @@ while true; do
         kill -9 $(cat "${QUICK_DIR}/cf_tcp.pid") >/dev/null 2>&1
         kill -9 $(cat "${QUICK_DIR}/cf_udp.pid") >/dev/null 2>&1
         rm -rf argo_tcp.log argo_udp.log
-        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_tcp.log 2>&1 &
+        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_tcp.log 2>&1 &
         echo $! > "${QUICK_DIR}/cf_tcp.pid"
-        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_udp.log 2>&1 &
+        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_udp.log 2>&1 &
         echo $! > "${QUICK_DIR}/cf_udp.pid"
         sleep 2
     elif [[ -n "$argo_tcp_domain" && -n "$argo_udp_domain" ]]; then
@@ -269,23 +267,18 @@ node_tag=$(echo "$isp" | sed -e 's/_/%20/g' -e 's/,/%2C/g')
 # 9. 组装 5 大节点链接
 > nodes.txt
 
-# 节点 1: VLESS Reality Vision (直连王牌)
 link_vision="vless://${uuid}@${server_ip}:${port_vision}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${dest_sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=tcp#${node_tag}-VLESS-Reality-Vision"
 echo "$link_vision" >> nodes.txt
 
-# 节点 2: VLESS XHTTP Reality (高并发免域名)
 link_xhttp_reality="vless://${uuid}@${server_ip}:${port_xhttp_reality}?encryption=none&security=reality&sni=${dest_sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=xhttp&mode=stream#${node_tag}-VLESS-XHTTP-Reality"
 echo "$link_xhttp_reality" >> nodes.txt
 
-# 节点 3: VLESS XHTTP UDP (直连 UDP 优化)
 link_xhttp_udp_direct="vless://${uuid}@${server_ip}:${port_xhttp_udp_direct}?encryption=none&security=none&type=xhttp&mode=packet#${node_tag}-VLESS-XHTTP-UDP-Direct"
 echo "$link_xhttp_udp_direct" >> nodes.txt
 
-# 节点 4: VLESS XHTTP TCP Argo (隧道标准版)
 link_argo_tcp="vless://${uuid}@${argo_tcp_domain}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-VLESS-XHTTP-TCP-Argo"
 echo "$link_argo_tcp" >> nodes.txt
 
-# 节点 5: VLESS XHTTP UDP Argo (隧道 UDP 增强版)
 link_argo_udp="vless://${uuid}@${argo_udp_domain}:443?encryption=none&security=tls&sni=${argo_udp_domain}&type=xhttp&host=${argo_udp_domain}&path=%2F${urlpath_argo_udp}&mode=packet#${node_tag}-VLESS-XHTTP-UDP-Argo"
 echo "$link_argo_udp" >> nodes.txt
 
@@ -297,7 +290,7 @@ else
 fi
 
 sub_port=$(cat /etc/yuzhou_sub_port 2>/dev/null || echo 25000)
-sub_token=$(cat /etc/yuzhou_sub_token 2>/dev/null || echo "sub-$(openssl rand -hex 4)")
+sub_token=$(cat /etc/yuzhou_sub_token 2>/dev/null \vert{}\vert{} echo "sub-$(openssl rand -hex 4)")
 secure_web_dir="${SUB_DIR}/${sub_token}"
 mkdir -p "$secure_web_dir"
 cp -f nodes.txt "${secure_web_dir}/nodes.txt"
@@ -319,14 +312,64 @@ fi
 
 echo -e "$port_vision\n$port_xhttp_reality\n$port_xhttp_udp_direct" > "$LAST_PORTS_FILE"
 
-clear
-echo "=========================================================="
-echo "    ✅ XHTTP & Vision 5大黄金节点部署成功（高位随机端口）"
-echo "=========================================================="
-echo -e "${GREEN}1. VLESS-Reality-Vision (端口 ${port_vision}):${NC}\n${link_vision}\n"
-echo -e "${GREEN}2. VLESS-XHTTP-Reality (端口 ${port_xhttp_reality}):${NC}\n${link_xhttp_reality}\n"
-echo -e "${GREEN}3. VLESS-XHTTP-UDP (端口 ${port_xhttp_udp_direct}):${NC}\n${link_xhttp_udp_direct}\n"
-echo -e "${GREEN}4. VLESS-XHTTP-TCP-Argo (隧道):${NC}\n${link_argo_tcp}\n"
-echo -e "${GREEN}5. VLESS-XHTTP-UDP-Argo (隧道):${NC}\n${link_argo_udp}\n"
-echo "=========================================================="
-read -p "按回车键返回主菜单..." < /dev/tty
+# ==============================================================
+# 💡 核心注入：自动生成开机自启恢复脚本与 Systemd 服务
+# ==============================================================
+cat > /etc/yuzhou/auto_xhttp_update.sh << 'EOF_UPDATE'
+#!/bin/bash
+YUZHOU_DIR="/etc/yuzhou"
+QUICK_DIR="${YUZHOU_DIR}/quick"
+SUB_DIR="/var/www/suoha_sub"
+sleep 15
+kill -9 $(pgrep -f "xray") >/dev/null 2>&1
+kill -9 $(pgrep -f "cloudflared-linux") >/dev/null 2>&1
+pkill -f "http.server" >/dev/null 2>&1
+[ ! -f "${QUICK_DIR}/xray/config.json" ] && exit 0
+cd "$QUICK_DIR" || exit
+"${QUICK_DIR}/xray/xray" run -config "${QUICK_DIR}/xray/config.json" >/dev/null 2>&1 &
+echo $! > "${QUICK_DIR}/xray.pid"
+
+config_file="${QUICK_DIR}/xray/config.json"
+uuid=$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][0]['settings']['clients'][0]['id'])" 2>/dev/null)
+public_key=$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][0]['streamSettings']['realitySettings']['privateKey'])" 2>/dev/null) # 占位或读取
+port_vision=$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][0]['port'])" 2>/dev/null)
+port_xhttp_reality=$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][1]['port'])" 2>/dev/null)
+port_xhttp_udp_direct=$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][2]['port'])" 2>/dev/null)
+port_argo_tcp=$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][3]['port'])" 2>/dev/null)
+port_argo_udp=$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][4]['port'])" 2>/dev/null)
+urlpath_argo_tcp=$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][3]['streamSettings']['xhttpSettings']['path'].lstrip('/'))" 2>/dev/null)
+urlpath_argo_udp=$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][4]['streamSettings']['xhttpSettings']['path'].lstrip('/'))" 2>/dev/null)
+
+[ -z "$uuid" ] && exit 1
+ips=4
+rm -rf argo_tcp.log argo_udp.log
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_tcp.log 2>&1 &
+echo $! > "${QUICK_DIR}/cf_tcp.pid"
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_udp.log 2>&1 &
+echo $! > "${QUICK_DIR}/cf_udp.pid"
+
+n=0
+argo_tcp_domain=""
+argo_udp_domain=""
+while true; do
+    n=$[$n+1]
+    argo_tcp_domain=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_tcp.log | head -n 1 | awk -F// '{print $2}')
+    argo_udp_domain=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_udp.log | head -n 1 | awk -F// '{print $2}') [$n -gt 30 ] && break
+    [[ -z "$argo_tcp_domain" \vert{}\vert{} -z "$argo_udp_domain" ]] && sleep 2 || break
+done
+[[ -z "$argo_tcp_domain" \vert{}\vert{} -z "$argo_udp_domain" ]] && exit 1
+
+server_ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
+[ -z "$server_ip" ] && server_ip=$(curl -s4 --connect-timeout 2 https://api.ip.sb/ip 2>/dev/null)
+node_tag="XHTTP_Node"
+dest_sni="learn.microsoft.com"
+short_id=$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][0]['streamSettings']['realitySettings']['shortIds'][0])" 2>/dev/null)
+# 重新获取 public_key 通过 xray 命令
+pub_key_real=$("${QUICK_DIR}/xray/xray" x25519 -i "$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][0]['streamSettings']['realitySettings']['privateKey'])")" 2>/dev/null | awk '/Public key:/{print $3}')
+
+> nodes.txt
+echo "vless://${uuid}@${server_ip}:${port_vision}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${dest_sni}&fp=chrome&pbk=${pub_key_real}&sid=${short_id}&type=tcp#${node_tag}-VLESS-Reality-Vision" >> nodes.txt
+echo "vless://${uuid}@${server_ip}:${port_xhttp_reality}?encryption=none&security=reality&sni=${dest_sni}&fp=chrome&pbk=${pub_key_real}&sid=${short_id}&type=xhttp&mode=stream#${node_tag}-VLESS-XHTTP-Reality" >> nodes.txt
+echo "vless://${uuid}@${server_ip}:${port_xhttp_udp_direct}?encryption=none&security=none&type=xhttp&mode=packet#${node_tag}-VLESS-XHTTP-UDP-Direct" >> nodes.txt
+echo "vless://${uuid}@${argo_tcp_domain}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-VLESS-XHTTP-TCP-Argo" >> nodes.txt
+echo "vless://${
