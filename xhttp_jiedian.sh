@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # ==============================================================
-# XHTTP & Vision 7节点终极版 (xhttp_jiedian.sh)
+# XHTTP & Vision 7节点终极版 (xhttp_jiedian.sh) - 完美共存追加版
 # 包括：Vision直连、XHTTP Reality、XHTTP UDP直连、Argo TCP 3节点、Argo UDP 3节点
-# 已完美集成：20000-60000高位防冲突随机端口、防火墙自动放行、开机自启与Argo自动重连恢复
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -22,7 +21,7 @@ NC="\033[0m"
 
 clear
 echo -e "${CYAN}==============================================================${NC}"
-echo -e "${CYAN}  XHTTP & Vision 7节点终极版 (TCP/UDP各3个 + 开机自启保活)  ${NC}"
+echo -e "${CYAN}  XHTTP & Vision 7节点终极版 (节点追加共存 + 开机自启保活)  ${NC}"
 echo -e "${CYAN}==============================================================${NC}"
 
 # 0. 自动检查并安装基础依赖包
@@ -62,7 +61,7 @@ pkill -f "${QUICK_DIR}/xray/xray" >/dev/null 2>&1
 pkill -f "cloudflared-linux" >/dev/null 2>&1
 
 cd "$QUICK_DIR" || exit
-rm -rf xray cloudflared-linux xray.zip
+rm -rf cloudflared-linux xray.zip
 
 # 4. 架构判断与核心下载
 arch="$(uname -m)"
@@ -264,61 +263,64 @@ done
 node_tag=$(echo "$isp" | sed -e 's/_/%20/g' -e 's/,/%2C/g')
 [ -z "$node_tag" ] && node_tag="XHTTP_Node"
 
-# 9. 组装 7 大节点链接（TCP 3个，UDP 3个，直连/Reality 2个）
-> nodes.txt
+# 9. 智能追加节点到 nodes.txt（不覆盖其他模块的原节点）
+work_nodes="${QUICK_DIR}/nodes.txt"
+touch "$work_nodes"
 
-# 直连及 Reality 节点 (共3个)
+# 清理旧的本模块专属标签节点，避免重复叠加
+sed -i "/VLESS-Reality-Vision/d" "$work_nodes"
+sed -i "/VLESS-XHTTP-Reality/d" "$work_nodes"
+sed -i "/VLESS-XHTTP-UDP-Direct/d" "$work_nodes"
+sed -i "/XHTTP-TCP-/d" "$work_nodes"
+sed -i "/XHTTP-UDP-/d" "$work_nodes"
+
+# 追加 7 个新节点
 link_vision="vless://${uuid}@${server_ip}:${port_vision}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${dest_sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=tcp#${node_tag}-VLESS-Reality-Vision"
-echo "$link_vision" >> nodes.txt
+echo "$link_vision" >> "$work_nodes"
 
 link_xhttp_reality="vless://${uuid}@${server_ip}:${port_xhttp_reality}?encryption=none&security=reality&sni=${dest_sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=xhttp&mode=stream#${node_tag}-VLESS-XHTTP-Reality"
-echo "$link_xhttp_reality" >> nodes.txt
+echo "$link_xhttp_reality" >> "$work_nodes"
 
 link_xhttp_udp_direct="vless://${uuid}@${server_ip}:${port_xhttp_udp_direct}?encryption=none&security=none&type=xhttp&mode=packet#${node_tag}-VLESS-XHTTP-UDP-Direct"
-echo "$link_xhttp_udp_direct" >> nodes.txt
+echo "$link_xhttp_udp_direct" >> "$work_nodes"
 
-# ----------------- Argo TCP 组 (生成 3 个节点：1个原始 + 2个优选) -----------------
+# Argo TCP 3个
+link_argo_tcp="vless://${uuid}@${argo_tcp_domain}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-XHTTP-TCP-Argo"
+echo "$link_argo_tcp" >> "$work_nodes"
+
 opt_domains=("cf.090227.xyz" "cloudflare.182682.xyz")
 opt_labels=("优选cf.090227" "优选182682")
-
-# 1. 原始 Argo TCP 节点
-link_argo_tcp="vless://${uuid}@${argo_tcp_domain}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-XHTTP-TCP-Argo"
-echo "$link_argo_tcp" >> nodes.txt
-
-# 2. 优选 Argo TCP 节点 (2个)
 for idx in "${!opt_domains[@]}"; do
     d="${opt_domains[$idx]}"
     l="${opt_labels[$idx]}"
     opt_tcp_link="vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-XHTTP-TCP-${l}-Argo"
-    echo "$opt_tcp_link" >> nodes.txt
+    echo "$opt_tcp_link" >> "$work_nodes"
 done
 
-# ----------------- Argo UDP 组 (生成 3 个节点：1个原始 + 2个优选) -----------------
-# 1. 原始 Argo UDP 节点
+# Argo UDP 3个
 link_argo_udp="vless://${uuid}@${argo_udp_domain}:443?encryption=none&security=tls&sni=${argo_udp_domain}&type=xhttp&host=${argo_udp_domain}&path=%2F${urlpath_argo_udp}&mode=packet#${node_tag}-XHTTP-UDP-Argo"
-echo "$link_argo_udp" >> nodes.txt
+echo "$link_argo_udp" >> "$work_nodes"
 
-# 2. 优选 Argo UDP 节点 (2个)
 for idx in "${!opt_domains[@]}"; do
     d="${opt_domains[$idx]}"
     l="${opt_labels[$idx]}"
     opt_udp_link="vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_udp_domain}&type=xhttp&host=${argo_udp_domain}&path=%2F${urlpath_argo_udp}&mode=packet#${node_tag}-XHTTP-UDP-${l}-Argo"
-    echo "$opt_udp_link" >> nodes.txt
+    echo "$opt_udp_link" >> "$work_nodes"
 done
 
-# 写入订阅文件
+# 同步刷新订阅 Base64 文件
 if [ "$(grep -i PRETTY_NAME /etc/os-release 2>/dev/null | cut -d \" -f2 | awk '{print $1}')" == "Alpine" ]; then
-    base64 nodes.txt | tr -d '\n' > sub.txt
+    base64 "$work_nodes" | tr -d '\n' > "${QUICK_DIR}/sub.txt"
 else
-    base64 -w 0 nodes.txt > sub.txt
+    base64 -w 0 "$work_nodes" > "${QUICK_DIR}/sub.txt"
 fi
 
 sub_port=$(cat /etc/yuzhou_sub_port 2>/dev/null || echo 25000)
 sub_token=$(cat /etc/yuzhou_sub_token 2>/dev/null || echo "sub-$(openssl rand -hex 4)")
 secure_web_dir="${SUB_DIR}/${sub_token}"
 mkdir -p "$secure_web_dir"
-cp -f nodes.txt "${secure_web_dir}/nodes.txt"
-cp -f sub.txt "${secure_web_dir}/sub.txt"
+cp -f "$work_nodes" "${secure_web_dir}/nodes.txt"
+cp -f "${QUICK_DIR}/sub.txt" "${secure_web_dir}/sub.txt"
 
 # 10. 防火墙动态管理
 echo -e "\n${CYAN}更新防火墙放行端口...${NC}"
@@ -334,10 +336,8 @@ elif command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewall
     firewall-cmd --reload >/dev/null 2>&1
 fi
 
-echo -e "$port_vision\n$port_xhttp_reality\n$port_xhttp_udp_direct" > "$LAST_PORTS_FILE"
-
 # ==============================================================
-# 💡 开机自启与 Argo 动态恢复保活脚本注入 (完美适配 TCP/UDP 各3个节点)
+# 💡 开机自启与恢复脚本注入（多模块追加共存版）
 # ==============================================================
 cat > /etc/yuzhou/auto_xhttp_update.sh << 'EOF_UPDATE'
 #!/bin/bash
@@ -390,35 +390,40 @@ dest_sni="learn.microsoft.com"
 short_id=$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][0]['streamSettings']['realitySettings']['shortIds'][0])" 2>/dev/null)
 pub_key_real=$("${QUICK_DIR}/xray/xray" x25519 -i "$(python3 -c "import json; data=json.load(open('$config_file')); print(data['inbounds'][0]['streamSettings']['realitySettings']['privateKey'])")" 2>/dev/null | awk '/Public key:/{print $3}')
 
-> nodes.txt
-echo "vless://${uuid}@${server_ip}:${port_vision}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${dest_sni}&fp=chrome&pbk=${pub_key_real}&sid=${short_id}&type=tcp#${node_tag}-VLESS-Reality-Vision" >> nodes.txt
-echo "vless://${uuid}@${server_ip}:${port_xhttp_reality}?encryption=none&security=reality&sni=${dest_sni}&fp=chrome&pbk=${pub_key_real}&sid=${short_id}&type=xhttp&mode=stream#${node_tag}-VLESS-XHTTP-Reality" >> nodes.txt
-echo "vless://${uuid}@${server_ip}:${port_xhttp_udp_direct}?encryption=none&security=none&type=xhttp&mode=packet#${node_tag}-VLESS-XHTTP-UDP-Direct" >> nodes.txt
+work_nodes="${QUICK_DIR}/nodes.txt"
+touch "$work_nodes"
+sed -i "/VLESS-Reality-Vision/d" "$work_nodes"
+sed -i "/VLESS-XHTTP-Reality/d" "$work_nodes"
+sed -i "/VLESS-XHTTP-UDP-Direct/d" "$work_nodes"
+sed -i "/XHTTP-TCP-/d" "$work_nodes"
+sed -i "/XHTTP-UDP-/d" "$work_nodes"
 
-# Argo TCP 3个
-echo "vless://${uuid}@${argo_tcp_domain}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-XHTTP-TCP-Argo" >> nodes.txt
+echo "vless://${uuid}@${server_ip}:${port_vision}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${dest_sni}&fp=chrome&pbk=${pub_key_real}&sid=${short_id}&type=tcp#${node_tag}-VLESS-Reality-Vision" >> "$work_nodes"
+echo "vless://${uuid}@${server_ip}:${port_xhttp_reality}?encryption=none&security=reality&sni=${dest_sni}&fp=chrome&pbk=${pub_key_real}&sid=${short_id}&type=xhttp&mode=stream#${node_tag}-VLESS-XHTTP-Reality" >> "$work_nodes"
+echo "vless://${uuid}@${server_ip}:${port_xhttp_udp_direct}?encryption=none&security=none&type=xhttp&mode=packet#${node_tag}-VLESS-XHTTP-UDP-Direct" >> "$work_nodes"
+
+echo "vless://${uuid}@${argo_tcp_domain}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-XHTTP-TCP-Argo" >> "$work_nodes"
 opt_domains=("cf.090227.xyz" "cloudflare.182682.xyz")
 opt_labels=("优选cf.090227" "优选182682")
 for idx in "${!opt_domains[@]}"; do
     d="${opt_domains[$idx]}"
     l="${opt_labels[$idx]}"
-    echo "vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-XHTTP-TCP-${l}-Argo" >> nodes.txt
+    echo "vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-XHTTP-TCP-${l}-Argo" >> "$work_nodes"
 done
 
-# Argo UDP 3个
-echo "vless://${uuid}@${argo_udp_domain}:443?encryption=none&security=tls&sni=${argo_udp_domain}&type=xhttp&host=${argo_udp_domain}&path=%2F${urlpath_argo_udp}&mode=packet#${node_tag}-XHTTP-UDP-Argo" >> nodes.txt
+echo "vless://${uuid}@${argo_udp_domain}:443?encryption=none&security=tls&sni=${argo_udp_domain}&type=xhttp&host=${argo_udp_domain}&path=%2F${urlpath_argo_udp}&mode=packet#${node_tag}-XHTTP-UDP-Argo" >> "$work_nodes"
 for idx in "${!opt_domains[@]}"; do
     d="${opt_domains[$idx]}"
     l="${opt_labels[$idx]}"
-    echo "vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_udp_domain}&type=xhttp&host=${argo_udp_domain}&path=%2F${urlpath_argo_udp}&mode=packet#${node_tag}-XHTTP-UDP-${l}-Argo" >> nodes.txt
+    echo "vless://${uuid}@${d}:443?encryption=none&security=tls&sni=${argo_udp_domain}&type=xhttp&host=${argo_udp_domain}&path=%2F${urlpath_argo_udp}&mode=packet#${node_tag}-XHTTP-UDP-${l}-Argo" >> "$work_nodes"
 done
 
-base64 -w 0 nodes.txt > sub.txt
+base64 -w 0 "$work_nodes" > "${QUICK_DIR}/sub.txt"
 sub_token=$(cat /etc/yuzhou_sub_token 2>/dev/null || echo "default_token")
 secure_web_dir="${SUB_DIR}/${sub_token}"
 mkdir -p "$secure_web_dir"
-cp -f nodes.txt "${secure_web_dir}/nodes.txt"
-cp -f sub.txt "${secure_web_dir}/sub.txt"
+cp -f "$work_nodes" "${secure_web_dir}/nodes.txt"
+cp -f "${QUICK_DIR}/sub.txt" "${secure_web_dir}/sub.txt"
 sub_port=$(cat /etc/yuzhou_sub_port 2>/dev/null || echo 25000)
 pkill -f "http.server $sub_port" >/dev/null 2>&1
 nohup python3 -m http.server $sub_port --directory "$SUB_DIR" >/dev/null 2>&1 &
@@ -447,8 +452,8 @@ systemctl enable yuzhou-xhttp-sub.service >/dev/null 2>&1
 
 clear
 echo "=========================================================="
-echo "    ✅ XHTTP & Vision 7节点终极版部署成功！"
-echo "    📌 包含：Vision直连、Reality、UDP直连、TCP(3个)、UDP(3个)"
-echo "    🛡️ 已完美绑定系统开机自启与 Argo 自动重连保活服务！"
+echo "    ✅ XHTTP & Vision 7节点终极版（完美共存追加版）部署成功！"
+echo "    📌 新增 7 个节点已追加写入 nodes.txt，旧节点完好无损！"
+echo "    🛡️ 已完美绑定系统开机自启与自动重连保活服务！"
 echo "=========================================================="
 read -p "按回车键返回主菜单..." < /dev/tty
