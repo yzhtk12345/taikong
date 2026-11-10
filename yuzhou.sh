@@ -195,14 +195,16 @@ show_menu() {
     echo -e "${CYAN}--------------------------------------------------------------${NC}"
     echo -e " 1. 加固 VPS 主机系统 (修改端口/用户/禁用Root/安装防火墙)"
     echo -e " 2. argo 6节点 (自动生成 VLESS + Trojan 443 优选节点)"
-    echo -e " 3. 固定 Argo 隧道(没做，以后或许会做)"
-    echo -e " 4. 卸载服务与清理"
-    echo -e " 5. 清空当前节点缓存"
-    echo -e " 6. 额外增加 IPv6 SS 共存部署"
-    echo -e " 7. 额外增加 Hysteria 2 直连备用节点"
-    echo -e " 8. 配置 Cloudflare WARP 灵活路由与分流"
-    echo -e " 9. 开启/管理 BBR 加速"
-    echo -e " 10.绑定域名 / 申请 SSL 证书 勇哥acme改"
+    echo -e " 3. 额外增加 IPv6 SS ipv6 直连节点"
+    echo -e " 4. 额外增加 Hysteria 2 双ip 直连节点"
+    echo -e " 5. 额外增加 vless xhttp reality 系列5节点"
+    echo -e " 6. 开启/管理 BBR 加速"
+    echo -e " 7. 配置 Cloudflare WARP 灵活路由与分流"
+    echo -e " 8.绑定域名 / 申请 SSL 证书 勇哥acme改"
+    echo -e " ------------------------------------------------------------"
+    echo -e " 9. 卸载服务与清理"
+    echo -e " 10. 清空当前节点缓存"
+    echo -e " 11. 固定 Argo 隧道(没做，以后或许会做)"
     echo -e " ------------------------------------------------------------"
     echo -e " 0. 退出脚本"
     echo -e "-----退出脚本后，想在进入脚本，只需要在命令行输入 yuzhou 就可以进入菜单了-----"
@@ -225,35 +227,39 @@ while true; do
             read -p "按回车返回..."
             ;;
         3)
-            echo "正在执行第 3 项: 安装固定 Argo 服务...还没有做"
-            read -p "按回车返回..."
-            ;;
-        4)
-            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/del_daima.sh)
-            read -p "按回车返回..."
-            ;;
-        5)
-            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/cache_daima.sh)
-            read -p "按回车返回..."
-            ;;
-        6)
             bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/ss_jiedian.sh)
             read -p "按回车返回..."
             ;;
-        7)
+        4)
             bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/hy2_jiedian.sh)
             read -p "按回车返回..."
             ;;
-        8)
-            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/warp_daima.sh)
+        5)
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/xhttp_jiedian.sh)
             read -p "按回车返回..."
-            ;;
-        9)
+            ;;    
+        6)
             bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/bbr_daima.sh)
             read -p "按回车返回..."
             ;;
-        10)
+        7)
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/warp_daima.sh)
+            read -p "按回车返回..."
+            ;;
+        8)
             bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/acme.sh)
+            read -p "按回车返回..."
+            ;;
+        9)
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/del_daima.sh)
+            read -p "按回车返回..."
+            ;;
+        10)
+            bash <(curl -fsSL -H "Cache-Control: no-cache" https://raw.githubusercontent.com/yzhtk12345/taikong/refs/heads/main/cache_daima.sh)
+            read -p "按回车返回..."
+            ;;
+        11)
+            echo "正在执行第 3 项: 安装固定 Argo 服务...还没有做"
             read -p "按回车返回..."
             ;;
         0)
