@@ -32,7 +32,7 @@ for pkg in unzip curl openssl python3; do
         if [ -f /etc/debian_version ]; then
             apt-get update >/dev/null 2>&1 && apt-get install -y $pkg >/dev/null 2>&1
         elif [ -f /etc/redhat-release ] || grep -qi "rhel" /etc/os-release || grep -qi "centos" /etc/os-release; then
-            yum install -y $pkg >/dev/null 2>&1 \vert{}\vert{} dnf install -y$pkg >/dev/null 2>&1
+            yum install -y $pkg >/dev/null 2>&1 || dnf install -y $pkg >/dev/null 2>&1
         elif grep -qi "alpine" /etc/os-release 2>/dev/null; then
             apk add --no-cache $pkg >/dev/null 2>&1
         fi
@@ -55,7 +55,7 @@ isp=$(curl -$ips -s --connect-timeout 2 https://speed.cloudflare.com/meta 2>/dev
 server_ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
 [ -z "$server_ip" ] && server_ip=$(curl -s4 --connect-timeout 2 https://api.ip.sb/ip 2>/dev/null)
 
-echo -e "${GREEN}[+] 网络模式: IPv${ips} \vert{} ISP:${isp} | 公网IP: ${server_ip}${NC}"
+echo -e "${GREEN}[+] 网络模式: IPv${ips} | ISP: ${isp} | 公网IP: ${server_ip}${NC}"
 
 # 3. 精确清理旧的进程
 pkill -f "${QUICK_DIR}/xray/xray" >/dev/null 2>&1
@@ -107,7 +107,7 @@ get_available_port() {
         else
             candidate_port=$((RANDOM % 40001 + 20000))
         fi
-        if ! (ss -tuln 2>/dev/null | grep -q ":$candidate_port " \vert{}\vert{} netstat -tuln 2>/dev/null \vert{} grep -q ":$candidate_port "); then
+        if ! (ss -tuln 2>/dev/null | grep -q ":$candidate_port " || netstat -tuln 2>/dev/null | grep -q ":$candidate_port "); then
             echo "$candidate_port"
             return 0
         fi
@@ -226,10 +226,10 @@ EOF
 "${QUICK_DIR}/xray/xray" run -config "${QUICK_DIR}/xray/config.json" >/dev/null 2>&1 &
 echo $! > "${QUICK_DIR}/xray.pid"
 
-"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_tcp.log 2>&1 &
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_tcp.log 2>&1 &
 echo $! > "${QUICK_DIR}/cf_tcp.pid"
 
-"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_udp.log 2>&1 &
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_udp.log 2>&1 &
 echo $! > "${QUICK_DIR}/cf_udp.pid"
 
 sleep 2
@@ -248,9 +248,9 @@ while true; do
         kill -9 $(cat "${QUICK_DIR}/cf_tcp.pid") >/dev/null 2>&1
         kill -9 $(cat "${QUICK_DIR}/cf_udp.pid") >/dev/null 2>&1
         rm -rf argo_tcp.log argo_udp.log
-        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_tcp.log 2>&1 &
+        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_tcp.log 2>&1 &
         echo $! > "${QUICK_DIR}/cf_tcp.pid"
-        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_udp.log 2>&1 &
+        "${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_udp.log 2>&1 &
         echo $! > "${QUICK_DIR}/cf_udp.pid"
         sleep 2
     elif [[ -n "$argo_tcp_domain" && -n "$argo_udp_domain" ]]; then
@@ -290,7 +290,7 @@ else
 fi
 
 sub_port=$(cat /etc/yuzhou_sub_port 2>/dev/null || echo 25000)
-sub_token=$(cat /etc/yuzhou_sub_token 2>/dev/null \vert{}\vert{} echo "sub-$(openssl rand -hex 4)")
+sub_token=$(cat /etc/yuzhou_sub_token 2>/dev/null || echo "sub-$(openssl rand -hex 4)")
 secure_web_dir="${SUB_DIR}/${sub_token}"
 mkdir -p "$secure_web_dir"
 cp -f nodes.txt "${secure_web_dir}/nodes.txt"
@@ -343,9 +343,9 @@ urlpath_argo_udp=$(python3 -c "import json; data=json.load(open('$config_file'))
 [ -z "$uuid" ] && exit 1
 ips=4
 rm -rf argo_tcp.log argo_udp.log
-"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_tcp.log 2>&1 &
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_tcp.log 2>&1 &
 echo $! > "${QUICK_DIR}/cf_tcp.pid"
-"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version$ips --protocol http2 >argo_udp.log 2>&1 &
+"${QUICK_DIR}/cloudflared-linux" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_udp.log 2>&1 &
 echo $! > "${QUICK_DIR}/cf_udp.pid"
 
 n=0
@@ -354,10 +354,11 @@ argo_udp_domain=""
 while true; do
     n=$[$n+1]
     argo_tcp_domain=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_tcp.log | head -n 1 | awk -F// '{print $2}')
-    argo_udp_domain=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_udp.log | head -n 1 | awk -F// '{print $2}') [$n -gt 30 ] && break
-    [[ -z "$argo_tcp_domain" \vert{}\vert{} -z "$argo_udp_domain" ]] && sleep 2 || break
+    argo_udp_domain=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_udp.log | head -n 1 | awk -F// '{print $2}')
+    [ $n -gt 30 ] && break
+    [[ -z "$argo_tcp_domain" || -z "$argo_udp_domain" ]] && sleep 2 || break
 done
-[[ -z "$argo_tcp_domain" \vert{}\vert{} -z "$argo_udp_domain" ]] && exit 1
+[[ -z "$argo_tcp_domain" || -z "$argo_udp_domain" ]] && exit 1
 
 server_ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
 [ -z "$server_ip" ] && server_ip=$(curl -s4 --connect-timeout 2 https://api.ip.sb/ip 2>/dev/null)
@@ -372,4 +373,49 @@ echo "vless://${uuid}@${server_ip}:${port_vision}?encryption=none&flow=xtls-rprx
 echo "vless://${uuid}@${server_ip}:${port_xhttp_reality}?encryption=none&security=reality&sni=${dest_sni}&fp=chrome&pbk=${pub_key_real}&sid=${short_id}&type=xhttp&mode=stream#${node_tag}-VLESS-XHTTP-Reality" >> nodes.txt
 echo "vless://${uuid}@${server_ip}:${port_xhttp_udp_direct}?encryption=none&security=none&type=xhttp&mode=packet#${node_tag}-VLESS-XHTTP-UDP-Direct" >> nodes.txt
 echo "vless://${uuid}@${argo_tcp_domain}:443?encryption=none&security=tls&sni=${argo_tcp_domain}&type=xhttp&host=${argo_tcp_domain}&path=%2F${urlpath_argo_tcp}&mode=stream#${node_tag}-VLESS-XHTTP-TCP-Argo" >> nodes.txt
-echo "vless://${
+echo "vless://${uuid}@${argo_udp_domain}:443?encryption=none&security=tls&sni=${argo_udp_domain}&type=xhttp&host=${argo_udp_domain}&path=%2F${urlpath_argo_udp}&mode=packet#${node_tag}-VLESS-XHTTP-UDP-Argo" >> nodes.txt
+
+base64 -w 0 nodes.txt > sub.txt
+sub_token=$(cat /etc/yuzhou_sub_token 2>/dev/null || echo "default_token")
+secure_web_dir="${SUB_DIR}/${sub_token}"
+mkdir -p "$secure_web_dir"
+cp -f nodes.txt "${secure_web_dir}/nodes.txt"
+cp -f sub.txt "${secure_web_dir}/sub.txt"
+sub_port=$(cat /etc/yuzhou_sub_port 2>/dev/null || echo 25000)
+pkill -f "http.server $sub_port" >/dev/null 2>&1
+nohup python3 -m http.server $sub_port --directory "$SUB_DIR" >/dev/null 2>&1 &
+EOF_UPDATE
+
+chmod +x /etc/yuzhou/auto_xhttp_update.sh
+
+cat > /etc/systemd/system/yuzhou-xhttp-sub.service << 'EOF_SVC'
+[Unit]
+Description=Yuzhou XHTTP & Argo Dynamic Auto Renewal Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /etc/yuzhou/auto_xhttp_update.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF_SVC
+
+systemctl daemon-reload >/dev/null 2>&1
+systemctl enable yuzhou-xhttp-sub.service >/dev/null 2>&1
+# ==============================================================
+
+clear
+echo "=========================================================="
+echo "    ✅ XHTTP & Vision 5大黄金节点部署成功！"
+echo "    🛡️ 已完美绑定系统开机自启与 Argo 自动重连保活服务！"
+echo "=========================================================="
+echo -e "${GREEN}1. VLESS-Reality-Vision (端口 ${port_vision}):${NC}\n${link_vision}\n"
+echo -e "${GREEN}2. VLESS-XHTTP-Reality (端口 ${port_xhttp_reality}):${NC}\n${link_xhttp_reality}\n"
+echo -e "${GREEN}3. VLESS-XHTTP-UDP (端口 ${port_xhttp_udp_direct}):${NC}\n${link_xhttp_udp_direct}\n"
+echo -e "${GREEN}4. VLESS-XHTTP-TCP-Argo (隧道):${NC}\n${link_argo_tcp}\n"
+echo -e "${GREEN}5. VLESS-XHTTP-UDP-Argo (隧道):${NC}\n${link_argo_udp}\n"
+echo "=========================================================="
+read -p "按回车键返回主菜单..." < /dev/tty
