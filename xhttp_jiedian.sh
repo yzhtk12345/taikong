@@ -2,7 +2,7 @@
 
 # ==============================================================
 # XHTTP & Vision 7节点终极版 (xhttp_jiedian.sh) 
-# 【代码完美集成版】内置 Python 自动化密钥生成与配置注入
+# 【密钥关键字完美修复版】
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -21,7 +21,7 @@ NC="\033[0m"
 
 clear
 echo -e "${CYAN}==============================================================${NC}"
-echo -e "${CYAN}   XHTTP & Vision 7节点部署模块 (已集成自动化密钥修复)     ${NC}"
+echo -e "${CYAN}   XHTTP & Vision 7节点部署模块 (密钥捕获精准修复版)         ${NC}"
 echo -e "${CYAN}==============================================================${NC}"
 
 # 0. 自动检查并安装基础依赖包
@@ -56,7 +56,7 @@ server_ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
 
 echo -e "${GREEN}[+] 网络模式: IPv${ips} | ISP: ${isp} | 公网IP: ${server_ip}${NC}"
 
-# 3. 更新 Xray-core 至最新官方二进制（确保完全支持 xhttp 与 reality 语法）
+# 3. 更新 Xray-core 至最新官方二进制
 arch="$(uname -m)"
 case "$arch" in
     x86_64 | x64 | amd64 )
@@ -112,7 +112,7 @@ urlpath_argo_udp="xhttp-udp-$(echo "$uuid" | awk -F- '{print $1}')"
 dest_sni="learn.microsoft.com"
 short_id=$(openssl rand -hex 4)
 
-# 5. 使用 Python 现场生成密钥并动态合并 /etc/yuzhou/quick/xray/config.json（保证 100% 不为空，且完美共存旧节点）
+# 5. 使用 Python 现场生成密钥并动态合并 config.json（已修正关键字匹配）
 config_file="${XRAY_DIR}/config.json"
 python3 - <<EOF
 import json
@@ -125,9 +125,9 @@ output = res.stdout + res.stderr
 
 priv, pub = "", ""
 for line in output.splitlines():
-    if "Private key" in line:
+    if "PrivateKey" in line:
         priv = line.split(":")[-1].strip()
-    elif "Public key" in line:
+    elif "PublicKey" in line or "Password (PublicKey)" in line:
         pub = line.split(":")[-1].strip()
 
 print(f"自动生成 PrivateKey: {priv}")
@@ -312,10 +312,18 @@ sed -i "/VLESS-XHTTP-UDP-Direct/d" "$work_nodes"
 sed -i "/XHTTP-TCP-/d" "$work_nodes"
 sed -i "/XHTTP-UDP-/d" "$work_nodes"
 
-# 获取刚刚 Python 写入的 public_key 用于直连 Reality 节点链接
-public_key=$(python3 -c "import json; data=json.load(open('$config_file')); print([ib for ib in data['inbounds'] if ib['tag']=='vless-vision-in'][0]['streamSettings']['realitySettings'].get('privateKey',''))")
-# 注意：reality链接里需要的是公钥，我们可以用 xray x25519 -i 私钥 快速算出来
-public_key=$("${XRAY_DIR}/xray" x25519 -i "$(python3 -c "import json; data=json.load(open('$config_file')); print([ib for ib in data['inbounds'] if ib['tag']=='vless-vision-in'][0]['streamSettings']['realitySettings']['privateKey'])")" 2>/dev/null | grep "Public key" | awk '{print $3}')
+# 获取真实的 PublicKey 用于直连 Reality 链接
+public_key=$(python3 -c "
+import json
+data = json.load(open('$config_file'))
+priv = [ib for ib in data['inbounds'] if ib['tag']=='vless-vision-in'][0]['streamSettings']['realitySettings']['privateKey']
+import subprocess
+res = subprocess.run(['${XRAY_DIR}/xray', 'x25519', '-i', priv], capture_output=True, text=True)
+for line in (res.stdout + res.stderr).splitlines():
+    if 'PublicKey' in line or 'Password (PublicKey)' in line:
+        print(line.split(':')[-1].strip())
+        break
+")
 
 echo "vless://${uuid}@${server_ip}:${port_vision}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${dest_sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=tcp#${node_tag}-VLESS-Reality-Vision" >> "$work_nodes"
 echo "vless://${uuid}@${server_ip}:${port_xhttp_reality}?encryption=none&security=reality&sni=${dest_sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=xhttp&mode=stream#${node_tag}-VLESS-XHTTP-Reality" >> "$work_nodes"
@@ -371,7 +379,7 @@ echo -e "$port_vision\n$port_xhttp_reality\n$port_xhttp_udp_direct" > "$LAST_POR
 clear
 echo "=========================================================="
 echo "    ✅ XHTTP & Vision 7大节点已成功合并写入全套系统！"
-echo "    📌 自动化 Python 密钥注入成功，Xray 核心运行完美！"
+echo "    📌 密钥关键字已修正，Xray 核心加载配置 100% 正常！"
 echo "    🌐 请在客户端中刷新订阅，体验全协议共存节点！"
 echo "=========================================================="
 read -p "按回车键返回主菜单..." < /dev/tty
