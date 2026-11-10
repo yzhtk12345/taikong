@@ -2,7 +2,7 @@
 
 # ==============================================================
 # XHTTP & Vision 7节点终极版 (xhttp_jiedian.sh) 
-# 【配置修复版】完美共存、路径严格统一、修复密钥提取防崩溃
+# 【代码完美集成版】内置 Python 自动化密钥生成与配置注入
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -21,7 +21,7 @@ NC="\033[0m"
 
 clear
 echo -e "${CYAN}==============================================================${NC}"
-echo -e "${CYAN}   XHTTP & Vision 7节点部署模块 (修复密钥提取与共存版)       ${NC}"
+echo -e "${CYAN}   XHTTP & Vision 7节点部署模块 (已集成自动化密钥修复)     ${NC}"
 echo -e "${CYAN}==============================================================${NC}"
 
 # 0. 自动检查并安装基础依赖包
@@ -83,21 +83,7 @@ unzip -q -o xray.zip -d "$XRAY_DIR"
 chmod +x cloudflared-linux "${XRAY_DIR}/xray"
 rm -f xray.zip
 
-# 4. 生成 XHTTP 专属密钥与参数（加入安全容错提取，防止为空）
-uuid=$(cat /proc/sys/kernel/random/uuid)
-x25519_output=$("${XRAY_DIR}/xray" x25519)
-private_key=$(echo "$x25519_output" | grep "Private key" | awk '{print $3}')
-public_key=$(echo "$x25519_output" | grep "Public key" | awk '{print $3}')
-
-if [ -z "$private_key" ]; then
-    private_key=$("${XRAY_DIR}/xray" x25519 | grep "Private" | awk '{print $3}')
-    public_key=$("${XRAY_DIR}/xray" x25519 | grep "Public" | awk '{print $3}')
-fi
-
-short_id=$(openssl rand -hex 4)
-dest_sni="learn.microsoft.com"
-
-# 智能防占用端口分配函数 (20000-60000 区间)
+# 4. 智能防占用端口分配函数 (20000-60000 区间)
 get_available_port() {
     local candidate_port
     while true; do
@@ -120,14 +106,35 @@ port_xhttp_udp_direct=$(get_available_port)
 port_argo_tcp=$(get_available_port)
 port_argo_udp=$(get_available_port)
 
+uuid=$(cat /proc/sys/kernel/random/uuid)
 urlpath_argo_tcp="xhttp-tcp-$(echo "$uuid" | awk -F- '{print $1}')"
 urlpath_argo_udp="xhttp-udp-$(echo "$uuid" | awk -F- '{print $1}')"
+dest_sni="learn.microsoft.com"
+short_id=$(openssl rand -hex 4)
 
-# 5. 使用 Python 动态合并 /etc/yuzhou/quick/xray/config.json（绝对保留 WS, Trojan, Hy2, SS）
+# 5. 使用 Python 现场生成密钥并动态合并 /etc/yuzhou/quick/xray/config.json（保证 100% 不为空，且完美共存旧节点）
 config_file="${XRAY_DIR}/config.json"
 python3 - <<EOF
 import json
 import os
+import subprocess
+
+xray_bin = "${XRAY_DIR}/xray"
+res = subprocess.run([xray_bin, "x25519"], capture_output=True, text=True)
+output = res.stdout + res.stderr
+
+priv, pub = "", ""
+for line in output.splitlines():
+    if "Private key" in line:
+        priv = line.split(":")[-1].strip()
+    elif "Public key" in line:
+        pub = line.split(":")[-1].strip()
+
+print(f"自动生成 PrivateKey: {priv}")
+print(f"自动生成 PublicKey: {pub}")
+
+if not priv:
+    raise Exception("严重错误：Xray 自动生成私钥失败！")
 
 config_path = "$config_file"
 new_inbounds = [
@@ -148,7 +155,7 @@ new_inbounds = [
                 "dest": "$dest_sni:443",
                 "xver": 0,
                 "serverNames": ["$dest_sni"],
-                "privateKey": "$private_key",
+                "privateKey": priv,
                 "shortIds": ["$short_id"]
             }
         }
@@ -171,7 +178,7 @@ new_inbounds = [
                 "dest": "$dest_sni:443",
                 "xver": 0,
                 "serverNames": ["$dest_sni"],
-                "privateKey": "$private_key",
+                "privateKey": priv,
                 "shortIds": ["$short_id"]
             }
         }
@@ -305,6 +312,11 @@ sed -i "/VLESS-XHTTP-UDP-Direct/d" "$work_nodes"
 sed -i "/XHTTP-TCP-/d" "$work_nodes"
 sed -i "/XHTTP-UDP-/d" "$work_nodes"
 
+# 获取刚刚 Python 写入的 public_key 用于直连 Reality 节点链接
+public_key=$(python3 -c "import json; data=json.load(open('$config_file')); print([ib for ib in data['inbounds'] if ib['tag']=='vless-vision-in'][0]['streamSettings']['realitySettings'].get('privateKey',''))")
+# 注意：reality链接里需要的是公钥，我们可以用 xray x25519 -i 私钥 快速算出来
+public_key=$("${XRAY_DIR}/xray" x25519 -i "$(python3 -c "import json; data=json.load(open('$config_file')); print([ib for ib in data['inbounds'] if ib['tag']=='vless-vision-in'][0]['streamSettings']['realitySettings']['privateKey'])")" 2>/dev/null | grep "Public key" | awk '{print $3}')
+
 echo "vless://${uuid}@${server_ip}:${port_vision}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${dest_sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=tcp#${node_tag}-VLESS-Reality-Vision" >> "$work_nodes"
 echo "vless://${uuid}@${server_ip}:${port_xhttp_reality}?encryption=none&security=reality&sni=${dest_sni}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=xhttp&mode=stream#${node_tag}-VLESS-XHTTP-Reality" >> "$work_nodes"
 echo "vless://${uuid}@${server_ip}:${port_xhttp_udp_direct}?encryption=none&security=none&type=xhttp&mode=packet#${node_tag}-VLESS-XHTTP-UDP-Direct" >> "$work_nodes"
@@ -359,7 +371,7 @@ echo -e "$port_vision\n$port_xhttp_reality\n$port_xhttp_udp_direct" > "$LAST_POR
 clear
 echo "=========================================================="
 echo "    ✅ XHTTP & Vision 7大节点已成功合并写入全套系统！"
-echo "    📌 旧模块（VLESS-WS、Trojan、SS、Hy2）全额保留且恢复通畅！"
+echo "    📌 自动化 Python 密钥注入成功，Xray 核心运行完美！"
 echo "    🌐 请在客户端中刷新订阅，体验全协议共存节点！"
 echo "=========================================================="
 read -p "按回车键返回主菜单..." < /dev/tty
