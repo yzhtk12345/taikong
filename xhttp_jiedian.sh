@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================
-# XHTTP & Vision 7节点精准追加更新模块 (xhttp_jiedian.sh)
-# 【跳过核心安装检测，纯精准注入，完美兼容现有 Argo/Hy2环境】
+# XHTTP & Vision 7节点精准追加修复版 (xhttp_jiedian.sh) 
+# 【彻底修复全局误杀进程漏洞：实现多协议独立隔离、和平共存】
 # ==============================================================
 
 YUZHOU_DIR="/etc/yuzhou"
@@ -21,10 +21,10 @@ NC="\033[0m"
 
 clear
 echo -e "${CYAN}==============================================================${NC}"
-echo -e "${CYAN}     XHTTP & Vision 节点精准追加模块 (跳过核心重复安装)       ${NC}"
+echo -e "${CYAN}     XHTTP & Vision 节点精准追加 (防误杀隧道隔离版)         ${NC}"
 echo -e "${CYAN}==============================================================${NC}"
 
-# 0. 自动检查基础运行依赖（仅保留 python3 / openssl）
+# 0. 自动检查基础运行依赖（仅保留 openssl 与 python3）
 for pkg in openssl python3; do
     if ! command -v $pkg &>/dev/null; then
         echo -e "${YELLOW}检测到系统未安装 $pkg，正在自动安装...${NC}"
@@ -50,6 +50,8 @@ else
     echo -e "${RED}[错误] 未在系统中找到 xray 可执行文件，请先完整安装一次基础环境！${NC}"
     exit 1
 fi
+
+cf_bin=$(command -v cloudflared || echo "${QUICK_DIR}/cloudflared-linux")
 
 # 1. 选择 Argo 连接模式 IPv4 或 IPv6
 read -p "请选择 argo 连接模式 IPV4 或者 IPV6 (输入 4 或 6，默认 4): " ips < /dev/tty
@@ -97,7 +99,7 @@ urlpath_argo_udp="xhttp-udp-$(echo "$uuid" | awk -F- '{print $1}')"
 dest_sni="learn.microsoft.com"
 short_id=$(openssl rand -hex 4)
 
-# 4. 参考 Hy2 逻辑：精准注入 config.json（清理旧 xhttp/vision 标签，保留其他所有协议）
+# 4. 参考 Hy2 的安全注入逻辑：精准清除旧 xhttp/vision 标签，完美保留其他协议
 config_file="${XRAY_DIR}/config.json"
 [ ! -f "$config_file" ] && config_file="${QUICK_DIR}/xray/config.json"
 
@@ -134,7 +136,7 @@ if "log" not in data:
 if "outbounds" not in data:
     data["outbounds"] = [{"protocol": "freedom"}]
 
-# 精准剥离旧的 xhttp/vision 标签，完美保留 ws, trojan, hy2, ss 等其他入站
+# 精准剥离旧的 xhttp/vision 标签，绝不碰 ws, trojan, hy2, ss 等其他入站
 existing_inbounds = data.get("inbounds", [])
 tags_to_remove = ["vless-vision-in", "vless-xhttp-reality-in", "vless-xhttp-udp-direct-in", "argo-tcp-in", "argo-udp-in"]
 existing_inbounds = [ib for ib in existing_inbounds if ib.get("tag") not in tags_to_remove]
@@ -242,47 +244,54 @@ with open(config_path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=4, ensure_ascii=False)
 EOF
 
-# 5. 重启后台进程并拉起 cloudflared 隧道
+# 5. 【核心防误杀修改】只精准清理自身旧的 PID 进程，绝对不使用全局 pkill 误伤其他 Argo 隧道
 if [ -f "${QUICK_DIR}/xray.pid" ]; then
     kill -9 $(cat "${QUICK_DIR}/xray.pid") >/dev/null 2>&1
     rm -f "${QUICK_DIR}/xray.pid"
 fi
-pkill -f "$xray_bin" >/dev/null 2>&1
-pkill -f "cloudflared-linux" >/dev/null 2>&1
+if [ -f "${QUICK_DIR}/cf_xhttp_tcp.pid" ]; then
+    kill -9 $(cat "${QUICK_DIR}/cf_xhttp_tcp.pid") >/dev/null 2>&1
+    rm -f "${QUICK_DIR}/cf_xhttp_tcp.pid"
+fi
+if [ -f "${QUICK_DIR}/cf_xhttp_udp.pid" ]; then
+    kill -9 $(cat "${QUICK_DIR}/cf_xhttp_udp.pid") >/dev/null 2>&1
+    rm -f "${QUICK_DIR}/cf_xhttp_udp.pid"
+fi
 
+# 启动当前 Xray
 "$xray_bin" run -config "$config_file" >/dev/null 2>&1 &
 echo $! > "${QUICK_DIR}/xray.pid"
 
-cf_bin=$(command -v cloudflared || echo "${QUICK_DIR}/cloudflared-linux")
-"$cf_bin" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_tcp.log 2>&1 &
-echo $! > "${QUICK_DIR}/cf_tcp.pid"
+# 仅启动当前 XHTTP 专属的 Argo 隧道，不影响其他业务
+"$cf_bin" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_xhttp_tcp.log 2>&1 &
+echo $! > "${QUICK_DIR}/cf_xhttp_tcp.pid"
 
-"$cf_bin" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_udp.log 2>&1 &
-echo $! > "${QUICK_DIR}/cf_udp.pid"
+"$cf_bin" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_xhttp_udp.log 2>&1 &
+echo $! > "${QUICK_DIR}/cf_xhttp_udp.pid"
 
 sleep 2
 
-# 6. 抓取临时域名
+# 6. 抓取当前 XHTTP 的 Argo 临时域名
 n=0
 while true; do
     n=$[$n+1]
     clear
-    echo "正在等待 Cloudflare 建立双 Argo 隧道，已等待 $n 秒..."
-    argo_tcp_domain=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_tcp.log | head -n 1 | awk -F// '{print $2}')
-    argo_udp_domain=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_udp.log | head -n 1 | awk -F// '{print $2}')
+    echo "正在等待 Cloudflare 建立 XHTTP 专属双 Argo 隧道，已等待 $n 秒..."
+    argo_tcp_domain=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_xhttp_tcp.log | head -n 1 | awk -F// '{print $2}')
+    argo_udp_domain=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" argo_xhttp_udp.log | head -n 1 | awk -F// '{print $2}')
 
     if [ $n -eq 25 ]; then
         n=0
-        kill -9 $(cat "${QUICK_DIR}/cf_tcp.pid") >/dev/null 2>&1
-        kill -9 $(cat "${QUICK_DIR}/cf_udp.pid") >/dev/null 2>&1
-        rm -rf argo_tcp.log argo_udp.log
-        "$cf_bin" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_tcp.log 2>&1 &
-        echo $! > "${QUICK_DIR}/cf_tcp.pid"
-        "$cf_bin" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_udp.log 2>&1 &
-        echo $! > "${QUICK_DIR}/cf_udp.pid"
+        [ -f "${QUICK_DIR}/cf_xhttp_tcp.pid" ] && kill -9 $(cat "${QUICK_DIR}/cf_xhttp_tcp.pid") >/dev/null 2>&1
+        [ -f "${QUICK_DIR}/cf_xhttp_udp.pid" ] && kill -9 $(cat "${QUICK_DIR}/cf_xhttp_udp.pid") >/dev/null 2>&1
+        rm -rf argo_xhttp_tcp.log argo_xhttp_udp.log
+        "$cf_bin" tunnel --url http://127.0.0.1:$port_argo_tcp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_xhttp_tcp.log 2>&1 &
+        echo $! > "${QUICK_DIR}/cf_xhttp_tcp.pid"
+        "$cf_bin" tunnel --url http://127.0.0.1:$port_argo_udp --no-autoupdate --edge-ip-version $ips --protocol http2 >argo_xhttp_udp.log 2>&1 &
+        echo $! > "${QUICK_DIR}/cf_xhttp_udp.pid"
         sleep 2
     elif [[ -n "$argo_tcp_domain" && -n "$argo_udp_domain" ]]; then
-        rm -rf argo_tcp.log argo_udp.log
+        rm -rf argo_xhttp_tcp.log argo_xhttp_udp.log
         break
     else
         sleep 1
@@ -356,6 +365,6 @@ echo -e "$port_vision\n$port_xhttp_reality\n$port_xhttp_udp_direct" > "$LAST_POR
 clear
 echo "=========================================================="
 echo "    ✅ XHTTP & Vision 7节点精准追加更新完成！"
-echo "    📌 未重复下载核心，完美继承现有 Argo/Hy2/WS 环境！"
+echo "    📌 已彻底移除全局误杀逻辑，完美保留你原有的老 Argo 与 Hy2！"
 echo "=========================================================="
 read -p "按回车键返回主菜单..." < /dev/tty
